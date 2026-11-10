@@ -1,0 +1,28 @@
+# Isolated Cloudflare preview queue consumer; points only at preview resources.
+name = "incidentiq-etl-preview"
+main = "api/src/etl_consumer.py"
+compatibility_date = "2026-11-08"
+compatibility_flags = ["python_workers"]
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "incidentiq-preview"
+database_id = "REPLACE_WITH_PREVIEW_D1_DATABASE_ID"
+
+[[vectorize]]
+binding = "VECTORIZE_INDEX"
+index_name = "REPLACE_WITH_PREVIEW_VECTORIZE_INDEX"
+
+[[queues.consumers]]
+queue = "REPLACE_WITH_PREVIEW_ETL_QUEUE"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "REPLACE_WITH_PREVIEW_ETL_DLQ"
+
+[observability]
+enabled = true
+
+[ai]
+binding = "ai"

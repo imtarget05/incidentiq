@@ -1,0 +1,41 @@
+name = "ai-knowledge-platform"
+main = "api/src/main.py"
+compatibility_date = "2026-11-08"
+compatibility_flags = ["python_workers"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-knowledge-platform"
+database_id = "aa3e2700-ccdc-4ab5-af89-abd5f3b01d26"
+
+# Vectorize bindings reference the index by NAME, not by ID.
+[[vectorize]]
+binding = "VECTORIZE_INDEX"
+index_name = "ai-knowledge-vectors"
+
+[[queues.producers]]
+binding = "ETL_QUEUE"
+queue = "etl-queue"
+
+[[queues.producers]]
+binding = "ETL_DLQ"
+queue = "etl-dlq"
+
+# Static dashboard assets. Requests to /api/* and /health go to the Worker first;
+# everything else is served from ./web.
+[assets]
+directory = "./web"
+binding = "ASSETS"
+not_found_handling = "none"
+run_worker_first = true
+
+[observability]
+enabled = true
+
+[vars]
+# inline = chunk/embed/upsert during the upload request (works without a consumer)
+# queue  = enqueue only; requires the ai-knowledge-etl consumer worker
+ETL_MODE = "inline"
+
+[ai]
+binding = "ai"

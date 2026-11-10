@@ -1,0 +1,38 @@
+# Isolated Cloudflare preview resources. This file must never use production IDs.
+name = "incidentiq-preview"
+main = "api/src/main.py"
+compatibility_date = "2026-11-08"
+compatibility_flags = ["python_workers"]
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "incidentiq-preview"
+database_id = "REPLACE_WITH_PREVIEW_D1_DATABASE_ID"
+
+[[vectorize]]
+binding = "VECTORIZE_INDEX"
+index_name = "REPLACE_WITH_PREVIEW_VECTORIZE_INDEX"
+
+[[queues.producers]]
+binding = "ETL_QUEUE"
+queue = "REPLACE_WITH_PREVIEW_ETL_QUEUE"
+
+[[queues.producers]]
+binding = "ETL_DLQ"
+queue = "REPLACE_WITH_PREVIEW_ETL_DLQ"
+
+[assets]
+directory = "./web"
+binding = "ASSETS"
+not_found_handling = "none"
+run_worker_first = true
+
+[observability]
+enabled = true
+
+[vars]
+ETL_MODE = "queue"
+
+[ai]
+binding = "ai"

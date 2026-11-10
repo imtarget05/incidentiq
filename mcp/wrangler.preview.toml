@@ -1,0 +1,23 @@
+# Isolated Cloudflare preview MCP worker; points only at preview resources.
+name = "incidentiq-mcp-preview"
+main = "src/index.ts"
+compatibility_date = "2026-11-08"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "incidentiq-preview"
+database_id = "REPLACE_WITH_PREVIEW_D1_DATABASE_ID"
+
+[[vectorize]]
+binding = "VECTORIZE_INDEX"
+index_name = "REPLACE_WITH_PREVIEW_VECTORIZE_INDEX"
+
+[ai]
+binding = "AI"
+
+[observability]
+enabled = true
+
+[vars]
+API_WORKER_URL = "REPLACE_WITH_PREVIEW_API_WORKER_URL"

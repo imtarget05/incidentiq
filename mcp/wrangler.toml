@@ -1,0 +1,21 @@
+name = "ai-knowledge-mcp"
+main = "src/index.ts"
+compatibility_date = "2026-11-08"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-knowledge-platform"
+database_id = "aa3e2700-ccdc-4ab5-af89-abd5f3b01d26"
+
+[[vectorize]]
+binding = "VECTORIZE_INDEX"
+index_name = "ai-knowledge-vectors"
+
+[ai]
+binding = "AI"
+
+[observability]
+enabled = true
+
+[vars]
+API_WORKER_URL = "REPLACE_WITH_API_WORKER_URL"

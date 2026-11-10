@@ -1,0 +1,16 @@
+{
+  "name": "ai-knowledge-platform",
+  "private": true,
+  "version": "1.0.0",
+  "description": "RAG + MCP + ETL + Security + Monitoring on Cloudflare Free",
+  "scripts": {
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0",
+    "eslint": "^8.0.0",
+    "wrangler": "^3.0.0"
+  }
+}

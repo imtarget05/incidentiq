@@ -1,0 +1,120 @@
+name: Deploy IncidentIQ preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incidentiq-cloudflare-preview
+  cancel-in-progress: false
+
+jobs:
+  deploy-preview:
+    name: Deploy isolated Cloudflare preview
+    runs-on: ubuntu-latest
+    environment: preview
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      PREVIEW_D1_DATABASE_ID: ${{ vars.PREVIEW_D1_DATABASE_ID }}
+      PREVIEW_VECTORIZE_INDEX: ${{ vars.PREVIEW_VECTORIZE_INDEX }}
+      PREVIEW_ETL_QUEUE: ${{ vars.PREVIEW_ETL_QUEUE }}
+      PREVIEW_ETL_DLQ: ${{ vars.PREVIEW_ETL_DLQ }}
+      PREVIEW_API_WORKER_URL: ${{ vars.PREVIEW_API_WORKER_URL }}
+      PREVIEW_MCP_WORKER_URL: ${{ vars.PREVIEW_MCP_WORKER_URL }}
+      PREVIEW_SMOKE_API_KEY: ${{ secrets.PREVIEW_SMOKE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pinned Wrangler from MCP lockfile
+        run: npm ci
+        working-directory: mcp
+
+      - name: Require isolated preview resources and render preview configs
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import tomllib
+
+          required = (
+              "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "PREVIEW_D1_DATABASE_ID",
+              "PREVIEW_VECTORIZE_INDEX", "PREVIEW_ETL_QUEUE", "PREVIEW_ETL_DLQ",
+              "PREVIEW_API_WORKER_URL", "PREVIEW_MCP_WORKER_URL", "PREVIEW_SMOKE_API_KEY",
+          )
+          missing = [key for key in required if not os.environ.get(key)]
+          if missing:
+              raise SystemExit("Missing preview environment settings: " + ", ".join(missing))
+
+          production = tomllib.loads(pathlib.Path("wrangler.toml").read_text())
+          production_id = production["d1_databases"][0]["database_id"]
+          production_vector = production["vectorize"][0]["index_name"]
+          production_queues = {item["queue"] for item in production["queues"]["producers"]}
+          if os.environ["PREVIEW_D1_DATABASE_ID"] == production_id:
+              raise SystemExit("Preview D1 must use a separate database ID")
+          if os.environ["PREVIEW_VECTORIZE_INDEX"] == production_vector:
+              raise SystemExit("Preview Vectorize must use a separate index")
+          if {os.environ["PREVIEW_ETL_QUEUE"], os.environ["PREVIEW_ETL_DLQ"]} & production_queues:
+              raise SystemExit("Preview ETL queues must be separate from production queues")
+          if os.environ["PREVIEW_ETL_QUEUE"] == os.environ["PREVIEW_ETL_DLQ"]:
+              raise SystemExit("Preview ETL queue and DLQ must have different names")
+          for key in ("PREVIEW_API_WORKER_URL", "PREVIEW_MCP_WORKER_URL"):
+              if not re.fullmatch(r"https://[^/]+", os.environ[key]):
+                  raise SystemExit(f"{key} must be an HTTPS origin")
+              if "preview" not in os.environ[key].lower():
+                  raise SystemExit(f"{key} must clearly identify the preview worker")
+
+          replacements = {
+              "REPLACE_WITH_PREVIEW_D1_DATABASE_ID": os.environ["PREVIEW_D1_DATABASE_ID"],
+              "REPLACE_WITH_PREVIEW_VECTORIZE_INDEX": os.environ["PREVIEW_VECTORIZE_INDEX"],
+              "REPLACE_WITH_PREVIEW_ETL_QUEUE": os.environ["PREVIEW_ETL_QUEUE"],
+              "REPLACE_WITH_PREVIEW_ETL_DLQ": os.environ["PREVIEW_ETL_DLQ"],
+              "REPLACE_WITH_PREVIEW_API_WORKER_URL": os.environ["PREVIEW_API_WORKER_URL"],
+          }
+          for filename in ("wrangler.preview.toml", "wrangler.etl.preview.toml", "mcp/wrangler.preview.toml"):
+              path = pathlib.Path(filename)
+              content = path.read_text()
+              for placeholder, value in replacements.items():
+                  content = content.replace(placeholder, value)
+              if "REPLACE_WITH_" in content:
+                  raise SystemExit(f"Unresolved preview placeholder in {filename}")
+              path.write_text(content)
+          PY
+
+      - name: Validate only preview Worker configurations
+        run: |
+          export PATH="$PWD/mcp/node_modules/.bin:$PATH"
+          wrangler deploy --dry-run --config wrangler.preview.toml --outdir /tmp/incidentiq-preview-api
+          wrangler deploy --dry-run --config wrangler.etl.preview.toml --outdir /tmp/incidentiq-preview-etl
+          wrangler deploy --dry-run --config mcp/wrangler.preview.toml --outdir /tmp/incidentiq-preview-mcp
+
+      - name: Apply migrations to preview D1 only
+        run: |
+          export PATH="$PWD/mcp/node_modules/.bin:$PATH"
+          wrangler d1 migrations apply incidentiq-preview --remote --config wrangler.preview.toml
+
+      - name: Deploy preview Workers
+        run: |
+          export PATH="$PWD/mcp/node_modules/.bin:$PATH"
+          wrangler deploy --config wrangler.preview.toml
+          wrangler deploy --config wrangler.etl.preview.toml
+          wrangler deploy --config mcp/wrangler.preview.toml
+
+      - name: Verify preview API behavior
+        run: ./scripts/smoke_test.sh "$PREVIEW_API_WORKER_URL" "$PREVIEW_SMOKE_API_KEY"
+
+      - name: Verify MCP protocol endpoint
+        run: |
+          response="$(curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer $PREVIEW_SMOKE_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+            "$PREVIEW_MCP_WORKER_URL/mcp")"
+          python3 -c 'import json,sys; names={x["name"] for x in json.loads(sys.argv[1])["result"]["tools"]}; assert {"search_runbooks","get_incident","get_triage_report"} <= names' "$response"

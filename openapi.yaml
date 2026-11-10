@@ -1,0 +1,939 @@
+openapi: 3.0.3
+info:
+  title: IncidentIQ — AI Incident Intelligence Platform
+  version: 1.0.0
+  description: >
+    Production-oriented RAG + MCP + ETL + Security + Monitoring + Evaluation
+    platform on Cloudflare Free. Helps engineers investigate Production incidents
+    by combining logs, alerts, runbooks, incident history and technical docs into
+    grounded triage reports with citations. Never mutates Production.
+servers:
+  - url: https://{account}.workers.dev
+    variables:
+      account:
+        default: incidentiq
+        description: Cloudflare Workers subdomain
+  - url: http://localhost:8787
+    description: Local development (wrangler dev)
+tags:
+  - name: Workspaces
+  - name: Documents
+  - name: Incidents
+  - name: Triage
+  - name: Observability
+  - name: Health
+security:
+  - ApiKeyAuth: []
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: Tenant API key. Only the key prefix is stored (SHA-256 hash).
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: not_found
+        message:
+          type: string
+          example: incident not found
+    PaginationMeta:
+      type: object
+      properties:
+        limit:
+          type: integer
+          example: 50
+        offset:
+          type: integer
+          example: 0
+    Incident:
+      type: object
+      required: [id, tenant_id, title, severity, service, environment, status, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          example: inc-123
+        workspace_id:
+          type: string
+        tenant_id:
+          type: string
+        title:
+          type: string
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+          example: CRITICAL
+        service:
+          type: string
+          example: payment-api
+        environment:
+          type: string
+          example: prod
+        status:
+          type: string
+          enum: [OPEN, INVESTIGATING, RESOLVED]
+          example: INVESTIGATING
+        version:
+          type: integer
+          example: 1
+        payload_hash:
+          type: string
+        created_at:
+          type: integer
+          example: 1794171700000
+        updated_at:
+          type: integer
+        resolved_at:
+          type: integer
+    IncidentEvent:
+      type: object
+      required: [id, incident_id, tenant_id, event_type, timestamp, created_at]
+      properties:
+        id:
+          type: string
+        incident_id:
+          type: string
+        tenant_id:
+          type: string
+        event_type:
+          type: string
+          example: status_changed
+        severity:
+          type: string
+        service:
+          type: string
+        environment:
+          type: string
+        timestamp:
+          type: integer
+        logs:
+          type: string
+        deploy_context:
+          type: string
+        created_at:
+          type: integer
+    Document:
+      type: object
+      required: [id, tenant_id, filename, status, version, uploaded_at]
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        filename:
+          type: string
+        content:
+          type: string
+        status:
+          type: string
+          enum: [uploaded, processing, processed, failed]
+        version:
+          type: integer
+          example: 1
+        idempotency_key:
+          type: string
+        uploaded_at:
+          type: integer
+        processed_at:
+          type: integer
+        error:
+          type: string
+    Chunk:
+      type: object
+      required: [id, document_id, tenant_id, content, vector_id, version]
+      properties:
+        id:
+          type: string
+        document_id:
+          type: string
+        tenant_id:
+          type: string
+        content:
+          type: string
+        vector_id:
+          type: string
+        version:
+          type: integer
+        created_at:
+          type: integer
+    TriageReport:
+      type: object
+      required: [id, incident_id, tenant_id, status, summary, citations, created_at]
+      properties:
+        id:
+          type: string
+        incident_id:
+          type: string
+        tenant_id:
+          type: string
+        status:
+          type: string
+          enum: [ok, insufficient_evidence]
+        summary:
+          type: string
+        hypotheses:
+          type: array
+          items:
+            type: object
+            properties:
+              text:
+                type: string
+              confirmed:
+                type: boolean
+        evidence:
+          type: array
+          items:
+            type: object
+            properties:
+              document_id:
+                type: string
+              version:
+                type: integer
+              section:
+                type: string
+              quote:
+                type: string
+        similar_incidents:
+          type: array
+          items:
+            type: string
+        read_only_checks:
+          type: array
+          items:
+            type: string
+        citations:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              document_id:
+                type: string
+              chunk_id:
+                type: string
+              score:
+                type: number
+        created_at:
+          type: integer
+    Workspace:
+      type: object
+      required: [id, name, is_active, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: integer
+    WorkspaceMember:
+      type: object
+      required: [id, workspace_id, tenant_id, role, created_at]
+      properties:
+        id:
+          type: string
+        workspace_id:
+          type: string
+        tenant_id:
+          type: string
+        role:
+          type: string
+          enum: [reader, investigator, admin]
+        created_at:
+          type: integer
+    RateLimitBucket:
+      type: object
+      required: [tenant_id, bucket_key, count, window_start]
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        bucket_key:
+          type: string
+        count:
+          type: integer
+        window_start:
+          type: integer
+    QuotaDashboard:
+      type: object
+      required: [tenant_id, ai_daily_count, daily_ai_limit, buckets]
+      properties:
+        tenant_id:
+          type: string
+        ai_daily_count:
+          type: integer
+        daily_ai_limit:
+          type: integer
+          example: 100
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/RateLimitBucket'
+    Health:
+      type: object
+      required: [status, service, ts]
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: ai-knowledge-platform
+        ts:
+          type: integer
+parameters:
+  IdempotencyKey:
+    name: Idempotency-Key
+    in: header
+    required: true
+    schema:
+      type: string
+    description: Idempotency key. Reusing the same key with the same payload returns 202.
+  IfMatch:
+    name: If-Match
+    in: header
+    schema:
+      type: string
+    description: Current version for optimistic concurrency. Stale version returns 409.
+  XRequestId:
+    name: X-Request-Id
+    in: header
+    schema:
+      type: string
+    description: Correlation ID. Returned in response header X-Request-ID.
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns ok if the worker environment is configured.
+      operationId: health
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/v1/workspaces:
+    get:
+      tags: [Workspaces]
+      summary: List workspaces for the caller's tenant
+      operationId: listWorkspaces
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: List of workspaces
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workspaces:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Workspace'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Workspaces]
+      summary: Create a workspace (seed helper; protected)
+      operationId: createWorkspace
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '201':
+          description: Created
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/documents:
+    get:
+      tags: [Documents]
+      summary: List tenant documents
+      operationId: listDocuments
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: List of documents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Document'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Documents]
+      summary: Upload a document (idempotent)
+      operationId: uploadDocument
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, idempotency_key]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                idempotency_key:
+                  type: string
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '202':
+          description: Uploaded, ETL enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: uploaded
+                  document_id:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/TooLarge'
+  /api/v1/documents/{document_id}:
+    put:
+      tags: [Documents]
+      summary: Update a document (version bump + re-enqueue ETL)
+      operationId: updateDocument
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                filename:
+                  type: string
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: updated
+                  document_id:
+                    type: string
+                  version:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/TooLarge'
+    delete:
+      tags: [Documents]
+      summary: Delete a document and its vectors
+      operationId: deleteDocument
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: deleted
+                  document_id:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{document_id}/reindex:
+    post:
+      tags: [Documents]
+      summary: Force re-embed and re-upsert a document
+      operationId: reindexDocument
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Reindexed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: reindexed
+                  document_id:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/incidents:
+    post:
+      tags: [Incidents]
+      summary: Create an incident (idempotent)
+      operationId: createIncident
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, severity, service, environment]
+              properties:
+                title:
+                  type: string
+                severity:
+                  type: string
+                  enum: [LOW, MEDIUM, HIGH, CRITICAL]
+                service:
+                  type: string
+                environment:
+                  type: string
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: created
+                  incident_id:
+                    type: string
+        '202':
+          description: Duplicate (same idempotency key + payload)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [Incidents]
+      summary: List incidents (placeholder; full list via workspaces)
+      operationId: listIncidents
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: OK
+  /api/v1/incidents/{incident_id}:
+    get:
+      tags: [Incidents]
+      summary: Get an incident by id (tenant-scoped)
+      operationId: getIncident
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Incident
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  incident:
+                    $ref: '#/components/schemas/Incident'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Incidents]
+      summary: Update incident status (optimistic concurrency via If-Match)
+      operationId: updateIncident
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [OPEN, INVESTIGATING, RESOLVED]
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: updated
+                  incident_id:
+                    type: string
+                  version:
+                    type: integer
+                  incident_status:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/incidents/{incident_id}/events:
+    post:
+      tags: [Incidents]
+      summary: Append an immutable incident event (timeline)
+      operationId: addIncidentEvent
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event_type:
+                  type: string
+                severity:
+                  type: string
+                service:
+                  type: string
+                environment:
+                  type: string
+                timestamp:
+                  type: integer
+                logs:
+                  type: string
+                deploy_context:
+                  type: string
+      responses:
+        '201':
+          description: Event added
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/incidents/{incident_id}/timeline:
+    get:
+      tags: [Incidents]
+      summary: Get incident event timeline
+      operationId: getIncidentTimeline
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Timeline events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  incident_id:
+                    type: string
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IncidentEvent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/incidents/{incident_id}/triage:
+    post:
+      tags: [Triage]
+      summary: Grounded incident triage (read-only; citations or abstention)
+      operationId: triageIncident
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Triage report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, insufficient_evidence]
+                  incident_id:
+                    type: string
+                  summary:
+                    type: string
+                  hypotheses:
+                    type: array
+                  evidence:
+                    type: array
+                  similar_incidents:
+                    type: array
+                  read_only_checks:
+                    type: array
+                  citations:
+                    type: array
+                  tokens_used:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/incidents/{incident_id}/report:
+    get:
+      tags: [Triage]
+      summary: Get latest triage report for an incident
+      operationId: getIncidentReport
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Report reference
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report_id:
+                    type: string
+                  incident_id:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/question:
+    post:
+      tags: [Triage]
+      summary: Ask a question with cited sources (RAG ask)
+      operationId: askQuestion
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question:
+                  type: string
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Answer with citations
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/metrics/quota:
+    get:
+      tags: [Observability]
+      summary: Per-tenant AI quota and rate-limit dashboard
+      operationId: getQuota
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Quota dashboard
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaDashboard'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+responses:
+  Unauthorized:
+    description: Missing or invalid API key
+    content:
+      application/json:
+        schema:
+          $ref: '#/components/schemas/Error'
+  Forbidden:
+    description: Tenant not member of workspace or insufficient role
+    content:
+      application/json:
+        schema:
+          $ref: '#/components/schemas/Error'
+  NotFound:
+    description: Resource not found or not in workspace
+    content:
+      application/json:
+        schema:
+          $ref: '#/components/schemas/Error'
+  BadRequest:
+    description: Validation error (missing field, bad encoding, too large)
+    content:
+      application/json:
+        schema:
+          $ref: '#/components/schemas/Error'
+  Conflict:
+    description: Idempotency conflict, stale version, invalid transition
+    content:
+      application/json:
+        schema:
+          $ref: '#/components/schemas/Error'
+  TooLarge:
+    description: Document exceeds 1 MB
+    content:
+      application/json:
+        schema:
+          $ref: '#/components/schemas/Error'
+  TooManyRequests:
+    description: AI daily quota exceeded or rate limit exceeded
+    content:
+      application/json:
+        schema:
+          $ref: '#/components/schemas/Error'

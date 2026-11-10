@@ -1,0 +1,27 @@
+name = "ai-knowledge-etl"
+main = "api/src/etl_consumer.py"
+compatibility_date = "2026-11-08"
+compatibility_flags = ["python_workers"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-knowledge-platform"
+database_id = "aa3e2700-ccdc-4ab5-af89-abd5f3b01d26"
+
+# Vectorize bindings reference the index by NAME, not by ID.
+[[vectorize]]
+binding = "VECTORIZE_INDEX"
+index_name = "ai-knowledge-vectors"
+
+[[queues.consumers]]
+queue = "etl-queue"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "etl-dlq"
+
+[observability]
+enabled = true
+
+[ai]
+binding = "ai"

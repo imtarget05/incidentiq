@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.13"
+  NODE_VERSION: "20"
+
+jobs:
+  quality:
+    name: Lint, test, build and SonarQube
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: api/requirements.txt
+
+      - name: Install Python dependencies and quality tools
+        run: python -m pip install -r api/requirements.txt ruff pytest-cov
+
+      - name: Install MCP dependencies
+        run: npm ci
+        working-directory: mcp
+
+      - name: Lint Python
+        run: ruff check --select E4,E7,E9,F api/src tests/api scripts
+
+      - name: Type-check and test MCP
+        run: |
+          npm run typecheck
+          npm test
+        working-directory: mcp
+
+      - name: Run Python tests with coverage
+        run: pytest --cov=main --cov=etl --cov-report=xml:coverage.xml --cov-report=term-missing tests/api
+
+      - name: Run fake-backed evaluation harness
+        run: python scripts/eval_harness.py
+
+      - name: Run demo scenarios
+        run: python scripts/demo.py
+
+      - name: Validate Wrangler configurations without credentials
+        run: |
+          mcp/node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/incidentiq-api-dry
+          mcp/node_modules/.bin/wrangler deploy --dry-run --config wrangler.etl.toml --outdir /tmp/incidentiq-etl-dry
+          mcp/node_modules/.bin/wrangler deploy --dry-run --config mcp/wrangler.toml --outdir /tmp/incidentiq-mcp-dry
+
+      - name: Require SonarQube Server configuration
+        env:
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          test -n "$SONAR_HOST_URL" || { echo "SONAR_HOST_URL repository variable is required" >&2; exit 1; }
+          test -n "$SONAR_TOKEN" || { echo "SONAR_TOKEN repository secret is required" >&2; exit 1; }
+
+      - name: SonarQube analysis and quality gate
+        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        env:
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=incidentiq
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+
+  security:
+    name: Trivy filesystem scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan dependencies, secrets and configuration
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table

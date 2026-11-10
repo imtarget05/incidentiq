@@ -2,6 +2,39 @@
   const API = window.location.origin;
   const $ = (id) => document.getElementById(id);
 
+  // ── Tenant API key (stored in localStorage, never hardcoded) ──────────────
+  const API_KEY_STORAGE_KEY = "incidentiq_api_key";
+  function getApiKey() {
+    return localStorage.getItem(API_KEY_STORAGE_KEY) || "";
+  }
+  function setApiKey(key) {
+    localStorage.setItem(API_KEY_STORAGE_KEY, key);
+    updateApiKeyStatus();
+  }
+  function updateApiKeyStatus() {
+    const el = $("apiKeyStatus");
+    const key = getApiKey();
+    if (!el) return;
+    if (key) {
+      el.textContent = "Đã cấu hình API key (" + key.slice(0, 4) + "…" + key.slice(-4) + ")";
+      el.className = "hint ok";
+    } else {
+      el.textContent = "⚠ Chưa có API key — các yêu cầu sẽ bị từ chối (401)";
+      el.className = "hint err";
+    }
+  }
+  function authHeaders(idem) {
+    const key = getApiKey();
+    if (!key) {
+      const el = $("apiKeyMsg");
+      if (el) { el.textContent = "Vui lòng nhập Tenant API key trước khi sử dụng."; el.className = "msg err"; }
+    }
+    return {
+      "X-Api-Key": key,
+      "Idempotency-Key": idem || "req-" + Date.now(),
+    };
+  }
+
   function setStatus(text) { const el = $("status"); if (el) el.textContent = text; }
   function msg(id, text, kind) {
     const el = $(id);
@@ -27,14 +60,13 @@
     const btn = $("btnUpload"); btn.disabled = true;
     msg("uploadMsg", "Đang tải lên...", "");
 
-    const idempotencyKey = "doc-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
     const fd = new FormData();
     fd.append("file", file);
 
     try {
       const r = await fetch(`${API}/api/v1/documents`, {
         method: "POST",
-        headers: { "Idempotency-Key": idempotencyKey },
+        headers: authHeaders("doc-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8)),
         body: fd,
       });
       const d = await r.json();
@@ -59,14 +91,13 @@
     const btn = $("btnAsk"); btn.disabled = true;
     $("answer").textContent = "Đang xử lý...";
     $("citations").textContent = "";
-    const idempotencyKey = "q-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
 
     try {
       const r = await fetch(`${API}/api/v1/question`, {
         method: "POST",
         headers: {
+          ...authHeaders("q-" + Date.now()),
           "Content-Type": "application/json",
-          "Idempotency-Key": idempotencyKey,
         },
         body: JSON.stringify({ question: q }),
       });
@@ -90,7 +121,7 @@
     if (!ul) return;
     ul.innerHTML = "<li>Đang tải...</li>";
     try {
-      const r = await fetch(`${API}/api/v1/documents`);
+      const r = await fetch(`${API}/api/v1/documents`, { headers: authHeaders() });
       const d = await r.json();
       ul.innerHTML = "";
       (d.documents || []).forEach(doc => {
@@ -109,14 +140,7 @@
   $("btnList") && $("btnList").addEventListener("click", listDocs);
   $("questionInput") && $("questionInput").addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
 
-  // Incident wiring
-  const API_KEY = ""; // set your tenant API key here to use incident features end-to-end
-  function incHeaders(idem) {
-    return {
-      "X-Api-Key": API_KEY,
-      "Idempotency-Key": idem || "inc-" + Date.now(),
-    };
-  }
+  // Incident wiring (uses shared authHeaders with tenant API key from localStorage)
   async function createIncident() {
     const title = $("incTitle").value.trim();
     const severity = $("incSeverity").value.trim();
@@ -128,7 +152,7 @@
     try {
       const r = await fetch(`${API}/api/v1/incidents`, {
         method: "POST",
-        headers: { ...incHeaders(idem), "Content-Type": "application/json" },
+        headers: { ...authHeaders(idem), "Content-Type": "application/json" },
         body: JSON.stringify({ title, severity, service, environment: envv }),
       });
       const d = await r.json();
@@ -151,7 +175,7 @@
     $("incTimeline").innerHTML = "<li>Đang tải timeline...</li>";
     try {
       const r = await fetch(`${API}/api/v1/incidents/${id}`, {
-        headers: incHeaders(),
+        headers: authHeaders(),
       });
       const d = await r.json();
       if (r.ok && d.incident) {
@@ -163,7 +187,7 @@
           "<b>Dịch vụ:</b> " + inc.service + "  <b>Môi trường:</b> " + inc.environment + "<br>" +
           "<b>Phiên bản:</b> " + inc.version + "  <b>Tạo:</b> " + inc.created_at;
         // timeline
-        const tr = await fetch(`${API}/api/v1/incidents/${id}/timeline`, { headers: incHeaders() });
+        const tr = await fetch(`${API}/api/v1/incidents/${id}/timeline`, { headers: authHeaders() });
         const td = await tr.json();
         $("incTimeline").innerHTML = "";
         (td.events || []).forEach(ev => {
@@ -187,6 +211,22 @@
   $("incIdem") && $("incIdem").addEventListener("keydown", (e) => { if (e.key === "Enter") createIncident(); });
   $("incLookupId") && $("incLookupId").addEventListener("keydown", (e) => { if (e.key === "Enter") lookupIncident(); });
 
+  $("btnSaveKey") && $("btnSaveKey").addEventListener("click", () => {
+    const key = $("apiKeyInput").value.trim();
+    if (!key) { msg("apiKeyMsg", "Vui lòng nhập API key.", "err"); return; }
+    setApiKey(key);
+    msg("apiKeyMsg", "Đã lưu API key vào localStorage.", "ok");
+  });
+  $("apiKeyInput") && $("apiKeyInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const key = $("apiKeyInput").value.trim();
+      if (!key) { msg("apiKeyMsg", "Vui lòng nhập API key.", "err"); return; }
+      setApiKey(key);
+      msg("apiKeyMsg", "Đã lưu API key vào localStorage.", "ok");
+    }
+  });
+
   health();
+  updateApiKeyStatus();
   listDocs();
 })();

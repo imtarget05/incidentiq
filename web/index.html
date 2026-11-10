@@ -9,6 +9,13 @@
 <body>
 <header class="bar">
   <div class="brand">AI Knowledge Platform</div>
+  <div class="auth">
+    <label>Tenant API Key</label>
+    <input type="password" id="apiKeyInput" placeholder="sk-…">
+    <button id="btnSaveKey">Lưu</button>
+    <span id="apiKeyStatus" class="hint">Chưa có API key</span>
+    <div id="apiKeyMsg" class="msg"></div>
+  </div>
   <div class="status" id="status">─</div>
 </header>
 

@@ -11,7 +11,7 @@ permissions:
 
 env:
   PYTHON_VERSION: "3.13"
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
 
 jobs:
   quality:

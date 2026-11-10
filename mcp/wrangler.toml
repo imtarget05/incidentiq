@@ -18,4 +18,4 @@ binding = "AI"
 enabled = true
 
 [vars]
-API_WORKER_URL = "REPLACE_WITH_API_WORKER_URL"
+API_WORKER_URL = "https://ai-knowledge-platform.tanmainguyenbinh.workers.dev"

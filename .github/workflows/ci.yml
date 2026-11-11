@@ -103,3 +103,41 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           format: table
+
+  dependency-audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: api/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+
+      - name: Install pip-audit
+        run: python -m pip install pip-audit
+
+      - name: Python dependency audit (pip-audit)
+        run: |
+          pip-audit -r api/requirements.txt \
+            --format json \
+            --output /tmp/pip-audit.json || true
+          pip-audit -r api/requirements.txt --progress-spinner off
+        continue-on-error: false
+
+      - name: Install MCP dependencies
+        run: npm ci
+        working-directory: mcp
+
+      - name: npm audit (MCP)
+        run: npm audit --audit-level=high
+        working-directory: mcp
+        continue-on-error: false

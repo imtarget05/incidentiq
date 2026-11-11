@@ -163,6 +163,7 @@ def env_placeholder_DB(request: Request) -> Any:
 
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
+        _validate_startup_config(self.env)
         return await asgi.fetch(app, request.js_object, self.env)
 
 
@@ -187,6 +188,35 @@ def _env(request: Request) -> Any:
     if env is None:
         env = request.scope.get("env")
     return env
+
+
+# ---------------------------------------------------------------------------
+# Startup secret validation (fail fast if required config is absent).
+# ---------------------------------------------------------------------------
+
+_REQUIRED_ENV_VARS = (
+    "D1_DATABASE_ID",
+    "VECTORIZE_INDEX_NAME",
+    "ETL_QUEUE_NAME",
+    "ETL_DLQ_NAME",
+)
+
+
+def _validate_startup_config(env: Any) -> None:
+    """Raise RuntimeError if required Cloudflare bindings are missing.
+
+    Called from the Worker entry point before serving traffic so that a
+    misconfigured deployment fails fast instead of returning 500s.
+    """
+    missing = []
+    for name in _REQUIRED_ENV_VARS:
+        if getattr(env, name, None) is None:
+            missing.append(name)
+    if missing:
+        raise RuntimeError(
+            f"Missing required Cloudflare bindings: {', '.join(missing)}. "
+            "Check wrangler.toml and terraform outputs."
+        )
 
 
 async def _tenant_from_api_key(env: Any, api_key: str) -> Optional[Dict[str, Any]]:
@@ -432,6 +462,66 @@ async def health(request: Request):
     return JSONResponse({"status": "ok" if ok else "degraded",
                          "service": "ai-knowledge-platform",
                          "ts": _now_ms()})
+
+
+@app.get("/health/live")
+async def health_live(request: Request):
+    """Kubernetes/uptime liveness probe — returns 200 if the process is alive."""
+    return JSONResponse({"status": "ok", "service": "ai-knowledge-platform", "ts": _now_ms()})
+
+
+@app.get("/health/ready")
+async def health_ready(request: Request):
+    """Kubernetes/uptime readiness probe — returns 200 only when all bindings are available."""
+    env = _env(request)
+    checks: Dict[str, str] = {}
+    overall = "ok"
+
+    # Check D1 database binding.
+    db_ok = False
+    if env is not None:
+        try:
+            db_binding = getattr(env, "DB", None)
+            db_ok = db_binding is not None
+        except Exception:
+            db_ok = False
+    checks["d1"] = "ok" if db_ok else "unavailable"
+
+    # Check Vectorize binding.
+    vec_ok = False
+    if env is not None:
+        try:
+            vec_ok = getattr(env, "VECTORIZE_INDEX", None) is not None
+        except Exception:
+            vec_ok = False
+    checks["vectorize"] = "ok" if vec_ok else "unavailable"
+
+    # Check Workers AI binding.
+    ai_ok = False
+    if env is not None:
+        try:
+            ai_ok = getattr(env, "ai", None) is not None
+        except Exception:
+            ai_ok = False
+    checks["workers_ai"] = "ok" if ai_ok else "unavailable"
+
+    # Check ETL Queue binding.
+    queue_ok = False
+    if env is not None:
+        try:
+            queue_ok = getattr(env, "ETL_QUEUE", None) is not None
+        except Exception:
+            queue_ok = False
+    checks["etl_queue"] = "ok" if queue_ok else "unavailable"
+
+    if not db_ok:
+        overall = "degraded"
+
+    status_code = 200 if overall == "ok" else 503
+    return JSONResponse(
+        {"status": overall, "service": "ai-knowledge-platform", "checks": checks, "ts": _now_ms()},
+        status_code=status_code,
+    )
 
 
 @app.post("/api/v1/documents")
@@ -914,15 +1004,27 @@ async def metrics_quota(request: Request, ctx: dict = Depends(require_role("read
 
 
 TRIAGE_SYSTEM_PROMPT = (
-    "You are an incident triage assistant. Answer using ONLY the provided context. "
-    "Always cite sources using [n] where n matches the context item number. "
-    "Distinguish confirmed hypotheses from unconfirmed ones. "
-    "If the answer cannot be determined from the context, say you have insufficient evidence. "
-    "Do NOT suggest any action that modifies production (no restart, no deploy, no config change). "
-    "Only recommend read-only checks. "
-    "Answer in the same language as the question. "
-    "Return a JSON object with keys: summary, hypotheses (list of {text, confirmed}), "
-    "read_only_checks (list of strings)."
+    "You are IncidentIQ, a senior Site Reliability Engineer (SRE) assistant specializing in "
+    "production incident triage. Your role is to analyze incidents using ONLY the evidence "
+    "provided in the context — never invent facts or guess.\n\n"
+    "STRICT RULES:\n"
+    "1. Base your analysis exclusively on the provided [n] context items.\n"
+    "2. Cite every factual claim with [n] where n is the context item number.\n"
+    "3. Never recommend actions that modify production: no restarts, deploys, config changes, "
+    "   or database writes. Only suggest READ-ONLY diagnostic commands.\n"
+    "4. Distinguish CONFIRMED hypotheses (directly supported by context) from UNCONFIRMED ones "
+    "   (plausible but not proven by context).\n"
+    "5. If the context is insufficient to form a hypothesis, state: "
+    "   'Insufficient evidence in the knowledge base.'\n"
+    "6. Reply in the same language as the incident title.\n\n"
+    "OUTPUT FORMAT — respond with ONLY valid JSON, no markdown fences:\n"
+    "{\n"
+    "  \"summary\": \"<2-3 sentence executive summary with citations>\",\n"
+    "  \"hypotheses\": [\n"
+    "    {\"text\": \"<hypothesis text with [n] citation>\", \"confirmed\": true|false}\n"
+    "  ],\n"
+    "  \"read_only_checks\": [\"<command1>\", \"<command2>\"]\n"
+    "}\n"
 )
 
 READ_ONLY_CHECKS = {
@@ -1145,6 +1247,7 @@ async def triage_incident(incident_id: str, request: Request,
     # LLM answer (with graceful degradation -> abstention if AI unavailable).
     answer_text = ""
     tokens_used = 0
+    ai_available = True
     try:
         llm = await env.ai.run("@cf/openai/gpt-oss-20b", {
             "messages": [
@@ -1158,19 +1261,42 @@ async def triage_incident(incident_id: str, request: Request,
         tokens_used = usage.get("total_tokens", 0)
     except Exception:
         answer_text = ""
+        ai_available = False
 
-    # Parse hypotheses from LLM answer; fallback to a single unconfirmed hypothesis.
+    # Parse structured JSON from LLM; fall back gracefully.
     hypotheses: List[Dict[str, Any]] = []
-    summary = answer_text.strip() or "Có bằng chứng nhưng không thể tổng hợp tự động."
-    for line in answer_text.splitlines():
-        line = line.strip()
-        if line.lower().startswith("hypothesis:"):
-            hyp_text = line.split(":", 1)[1].strip()
-            confirmed = "confirmed" in hyp_text.lower() or "yes" in hyp_text.lower()
-            hypotheses.append({"text": hyp_text, "confirmed": bool(confirmed)})
+    summary = "Có bằng chứng nhưng không thể tổng hợp tự động."
+    if answer_text.strip():
+        raw = answer_text.strip()
+        if raw.startswith("```"):
+            raw = raw.lstrip("`").split("```")[0].strip()
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+        try:
+            parsed = json.loads(raw)
+            summary = parsed.get("summary", summary) or summary
+            for h in parsed.get("hypotheses", []):
+                if isinstance(h, dict) and "text" in h:
+                    hypotheses.append({
+                        "text": str(h["text"]),
+                        "confirmed": bool(h.get("confirmed", False)),
+                    })
+        except Exception:
+            summary = answer_text.strip()
+            for line in answer_text.splitlines():
+                line = line.strip()
+                if line.lower().startswith("hypothesis:"):
+                    hyp_text = line.split(":", 1)[1].strip()
+                    confirmed = "confirmed" in hyp_text.lower() or "yes" in hyp_text.lower()
+                    hypotheses.append({"text": hyp_text, "confirmed": bool(confirmed)})
     if not hypotheses:
         hypotheses = [{"text": summary, "confirmed": False}]
-
+    if not ai_available:
+        summary = (
+            f"Workers AI is currently unavailable. {len(context_chunks)} evidence item(s) were "
+            f"retrieved from the knowledge base. Manual review recommended."
+        )
+        hypotheses = [{"text": "AI inference unavailable — review evidence items manually.", "confirmed": False}]
     similar = await _similar_incidents(env, tenant_id, incident_id, service)
     try:
         await _store_triage_report(env, incident_id, tenant_id, "ok", summary, hypotheses,
@@ -1333,3 +1459,13 @@ async def ask_question(request: Request,
         "tokens_used": tokens_used,
         "ts": _now_ms(),
     })
+
+
+# ---------------------------------------------------------------------------
+# API v2 — load versioned router.
+# ---------------------------------------------------------------------------
+try:
+    from v2 import _v2  # noqa: E402  (import after app is defined)
+    app.include_router(_v2)
+except ImportError:
+    pass  # v2 module not available in test harness — skip gracefully.

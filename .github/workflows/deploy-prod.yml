@@ -1,0 +1,107 @@
+name: Deploy IncidentIQ production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incidentiq-cloudflare-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-production:
+    name: Deploy to Cloudflare production
+    runs-on: ubuntu-latest
+    environment: production          # requires branch-protection approval
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PROD_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_API_WORKER_URL: ${{ vars.PROD_API_WORKER_URL }}
+      PROD_MCP_WORKER_URL: ${{ vars.PROD_MCP_WORKER_URL }}
+      PROD_SMOKE_API_KEY: ${{ secrets.PROD_SMOKE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pinned Wrangler from MCP lockfile
+        run: npm ci
+        working-directory: mcp
+
+      - name: Validate required production secrets and variables
+        run: |
+          python3 - <<'PY'
+          import os, sys
+
+          required_secrets = [
+              "CLOUDFLARE_API_TOKEN",
+              "PROD_SMOKE_API_KEY",
+          ]
+          required_vars = [
+              "CLOUDFLARE_ACCOUNT_ID",
+              "PROD_API_WORKER_URL",
+              "PROD_MCP_WORKER_URL",
+          ]
+          missing = []
+          for key in required_secrets + required_vars:
+              if not os.environ.get(key):
+                  missing.append(key)
+          if missing:
+              print(f"::error::Missing required production configuration: {', '.join(missing)}", file=sys.stderr)
+              sys.exit(1)
+
+          import re
+          for key in ("PROD_API_WORKER_URL", "PROD_MCP_WORKER_URL"):
+              val = os.environ[key]
+              if not re.fullmatch(r"https://[^/]+", val):
+                  print(f"::error::{key} must be an HTTPS origin (got: {val})", file=sys.stderr)
+                  sys.exit(1)
+              if "preview" in val.lower():
+                  print(f"::error::{key} must NOT point to a preview worker", file=sys.stderr)
+                  sys.exit(1)
+          print("All production configuration validated.")
+          PY
+
+      - name: Validate production Wrangler configurations (dry run)
+        run: |
+          export PATH="$PWD/mcp/node_modules/.bin:$PATH"
+          wrangler deploy --dry-run --outdir /tmp/incidentiq-prod-api
+          wrangler deploy --dry-run --config wrangler.etl.toml --outdir /tmp/incidentiq-prod-etl
+          wrangler deploy --dry-run --config mcp/wrangler.toml --outdir /tmp/incidentiq-prod-mcp
+
+      - name: Apply D1 migrations to production
+        run: |
+          export PATH="$PWD/mcp/node_modules/.bin:$PATH"
+          wrangler d1 migrations apply ai-knowledge-platform --remote
+
+      - name: Deploy production Workers
+        run: |
+          export PATH="$PWD/mcp/node_modules/.bin:$PATH"
+          wrangler deploy
+          wrangler deploy --config wrangler.etl.toml
+          wrangler deploy --config mcp/wrangler.toml
+
+      - name: Smoke test production API
+        run: ./scripts/smoke_test.sh "$PROD_API_WORKER_URL" "$PROD_SMOKE_API_KEY"
+
+      - name: Verify production MCP protocol endpoint
+        run: |
+          response="$(curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer $PROD_SMOKE_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+            "$PROD_MCP_WORKER_URL/mcp")"
+          python3 -c 'import json,sys; names={x["name"] for x in json.loads(sys.argv[1])["result"]["tools"]}; assert {"search_runbooks","get_incident","get_triage_report"} <= names, f"Missing tools: {names}"' "$response"
+          echo "Production MCP endpoint verified."
+
+      - name: Verify health endpoints
+        run: |
+          curl --fail --silent --show-error --max-time 10 "$PROD_API_WORKER_URL/health/live" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("status")=="ok", d'
+          curl --fail --silent --show-error --max-time 15 "$PROD_API_WORKER_URL/health/ready" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("status") in ("ok","degraded"), d'
+          echo "Health endpoints verified."

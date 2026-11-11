@@ -118,3 +118,19 @@ jobs:
             -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
             "$PREVIEW_MCP_WORKER_URL/mcp")"
           python3 -c 'import json,sys; names={x["name"] for x in json.loads(sys.argv[1])["result"]["tools"]}; assert {"search_runbooks","get_incident","get_triage_report"} <= names' "$response"
+
+      - name: Collect deploy evidence
+        run: |
+          mkdir -p deploy-evidence
+          {
+            printf 'deploy_time=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf 'environment=preview\n'
+            printf 'api_worker_url=%s\n' "$PREVIEW_API_WORKER_URL"
+            printf 'mcp_worker_url=%s\n' "$PREVIEW_MCP_WORKER_URL"
+          } > deploy-evidence/deploy.txt
+          ./scripts/health-cf.sh "$PREVIEW_API_WORKER_URL" > deploy-evidence/health.txt 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: incidentiq-deploy-evidence
+          path: deploy-evidence/
+          if-no-files-found: error

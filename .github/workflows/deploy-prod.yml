@@ -105,3 +105,19 @@ jobs:
           curl --fail --silent --show-error --max-time 10 "$PROD_API_WORKER_URL/health/live" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("status")=="ok", d'
           curl --fail --silent --show-error --max-time 15 "$PROD_API_WORKER_URL/health/ready" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("status") in ("ok","degraded"), d'
           echo "Health endpoints verified."
+
+      - name: Collect deploy evidence
+        run: |
+          mkdir -p deploy-evidence
+          {
+            printf 'deploy_time=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf 'environment=production\n'
+            printf 'api_worker_url=%s\n' "$PROD_API_WORKER_URL"
+            printf 'mcp_worker_url=%s\n' "$PROD_MCP_WORKER_URL"
+          } > deploy-evidence/deploy.txt
+          ./scripts/health-cf.sh "$PROD_API_WORKER_URL" > deploy-evidence/health.txt 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: incidentiq-deploy-evidence
+          path: deploy-evidence/
+          if-no-files-found: error

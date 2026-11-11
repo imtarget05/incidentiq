@@ -14,7 +14,6 @@ from main import (
     _json_error,
     _now_ms,
     _row_col,
-    app,
     require_role,
 )
 
@@ -114,5 +113,3 @@ async def v2_metrics_quota(request: Request, ctx: dict = Depends(require_role("r
         "buckets": buckets,
     })
 
-
-app.include_router(_v2)

@@ -732,6 +732,38 @@ async def list_workspaces(request: Request, ctx: dict = Depends(require_role("re
     return JSONResponse({"workspaces": workspaces})
 
 
+@app.post("/api/v1/workspaces")
+async def create_workspace(request: Request,
+                           tenant: dict = Depends(get_tenant)):
+    env = _env(request)
+    tenant_id = tenant["id"]
+    try:
+        body = await request.json()
+    except Exception:
+        return _json_error(400, "invalid_json", "Request body must be JSON")
+    name = (body or {}).get("name", "").strip()
+    if not name:
+        return _json_error(400, "missing_name", "workspace name is required")
+    if len(name) > 100:
+        return _json_error(400, "name_too_long", "workspace name exceeds 100 characters")
+
+    ws_id = str(uuid.uuid4())
+    now = _now_ms()
+    try:
+        await env.DB.prepare(
+            "INSERT INTO workspaces (id, name, created_at, is_active) VALUES (?, ?, ?, 1)"
+        ).bind(ws_id, name, now).run()
+        await env.DB.prepare(
+            "INSERT INTO workspace_members (id, workspace_id, tenant_id, role, created_at) "
+            "VALUES (?, ?, ?, 'admin', ?)"
+        ).bind(str(uuid.uuid4()), ws_id, tenant_id, now).run()
+        await _audit(env, tenant_id, tenant_id, "workspace.create", ws_id, {"name": name})
+    except Exception as exc:
+        return _json_error(500, "db_insert_failed", str(exc))
+
+    return JSONResponse({"status": "created", "workspace_id": ws_id, "name": name}, status_code=201)
+
+
 @app.post("/api/v1/incidents")
 async def create_incident(request: Request,
                           ctx: dict = Depends(require_role("investigator")),
@@ -1059,6 +1091,17 @@ async def _record_triage_metric(env: Any, tenant_id: str, incident_id: str, stat
         pass
 
 
+async def _record_token_usage(env: Any, tenant_id: str, endpoint: str, model: str,
+                              prompt_tokens: int, completion_tokens: int, total_tokens: int) -> None:
+    try:
+        await env.DB.prepare(
+            "INSERT INTO token_usage_log (id, tenant_id, endpoint, model, prompt_tokens, completion_tokens, total_tokens, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).bind(str(uuid.uuid4()), tenant_id, endpoint, model, prompt_tokens, completion_tokens, total_tokens, _now_ms()).run()
+    except Exception:
+        pass
+
+
 async def _store_triage_report(env: Any, incident_id: str, tenant_id: str, status: str,
                                 summary: str, hypotheses: List[Dict[str, Any]],
                                 evidence: List[Dict[str, Any]], similar: List[str],
@@ -1306,6 +1349,7 @@ async def triage_incident(incident_id: str, request: Request,
                    incident_id=incident_id, error=type(exc).__name__)
         return _json_error(503, "report_persist_failed", "Triage report could not be persisted")
     await _record_triage_metric(env, tenant_id, incident_id, "ok", len(citations), tokens_used, 0)
+    await _record_token_usage(env, tenant_id, "triage", "@cf/openai/gpt-oss-20b", 0, 0, tokens_used)
     await _audit(env, tenant_id, tenant_id, "incident.triage", incident_id,
                  {"status": "ok", "tokens": tokens_used, "citations": [c["id"] for c in citations]})
 
@@ -1449,6 +1493,7 @@ async def ask_question(request: Request,
     except Exception:
         answer = "Xin loi, toi hien khong the tao cau tra loi. Vui long thu lai sau."
 
+    await _record_token_usage(env, tenant_id, "question", "@cf/openai/gpt-oss-20b", 0, 0, tokens_used)
     await _audit(env, tenant_id, tenant_id, "question", question,
                  {"idempotency_key": idempotency_key, "tokens": tokens_used,
                   "citations": [c["id"] for c in citations]})

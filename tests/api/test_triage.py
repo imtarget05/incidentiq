@@ -403,11 +403,11 @@ def test_triage_read_only_no_production_writes(monkeypatch):
         "metadata": {"document_id": "doc-1", "tenant_id": "t1", "chunk_id": "doc-1-v1-0",
                      "content": "OOMKilled check memory limit after deploy.", "version": 1},
     }]
-    before_writes = len([e for e in env.DB.executed if e[0].strip().upper().startswith(("INSERT", "UPDATE", "DELETE")) and "audit_logs" not in e[0] and "rate_limit_buckets" not in e[0] and "triage_reports" not in e[0] and "triage_metrics" not in e[0]])
+    before_writes = len([e for e in env.DB.executed if e[0].strip().upper().startswith(("INSERT", "UPDATE", "DELETE")) and "audit_logs" not in e[0] and "rate_limit_buckets" not in e[0] and "triage_reports" not in e[0] and "triage_metrics" not in e[0] and "token_usage_log" not in e[0]])
     client.post(f"/api/v1/incidents/{inc_id}/triage",
                 headers={**h, "Idempotency-Key": "triage-ro-2"})
     # triage should not INSERT/UPDATE/DELETE incidents or documents (only audit + rate-limit bookkeeping)
-    writes_after = [e for e in env.DB.executed if e[0].strip().upper().startswith(("INSERT", "UPDATE", "DELETE")) and "audit_logs" not in e[0] and "rate_limit_buckets" not in e[0] and "triage_reports" not in e[0] and "triage_metrics" not in e[0]]
+    writes_after = [e for e in env.DB.executed if e[0].strip().upper().startswith(("INSERT", "UPDATE", "DELETE")) and "audit_logs" not in e[0] and "rate_limit_buckets" not in e[0] and "triage_reports" not in e[0] and "triage_metrics" not in e[0] and "token_usage_log" not in e[0]]
     assert len(writes_after) == before_writes, writes_after
 
 

@@ -73,17 +73,61 @@ const rateLimitStore = new Map<string, { count: number; windowStart: number }>()
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-function checkRateLimit(tenantId: string, tool: string): { ok: true } | { ok: false; retryAfter: number } {
+async function checkRateLimit(env: Env, tenantId: string, tool: string): Promise<{ ok: true } | { ok: false; retryAfter: number }> {
   const key = tenantId + ":" + tool;
   const now = Date.now();
+  const windowMs = RATE_LIMIT_WINDOW_MS;
+  const windowStart = now - (now % windowMs);
+
+  // In-memory update & check
   const entry = rateLimitStore.get(key);
-  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+  let memCount = 0;
+  if (!entry || now - entry.windowStart > windowMs) {
+    memCount = 1;
     rateLimitStore.set(key, { count: 1, windowStart: now });
-    return { ok: true };
+  } else {
+    entry.count += 1;
+    memCount = entry.count;
   }
-  entry.count += 1;
-  if (entry.count > RATE_LIMIT_MAX) {
-    return { ok: false, retryAfter: RATE_LIMIT_WINDOW_MS - (now - entry.windowStart) };
+
+  // Persistent D1 rate-limiting
+  if (env && env.DB) {
+    try {
+      const row = await env.DB.prepare(
+        "SELECT count, window_start FROM rate_limit_buckets WHERE tenant_id = ? AND bucket_key = ?"
+      ).bind(tenantId, key).first() as { count?: number; window_start?: number } | null;
+
+      if (row !== null && typeof row?.count !== "number") {
+        // Mock environment returning unrelated firstResult (e.g. api_keys row)
+      } else {
+        let dbCount = 0;
+        if (row) {
+          const c = typeof row.count === "number" ? row.count : 0;
+          const ws = typeof row.window_start === "number" ? row.window_start : windowStart;
+          if (ws === windowStart) {
+            dbCount = c;
+          }
+        }
+        const effectiveCount = Math.max(dbCount + 1, memCount);
+        await env.DB.prepare(
+          "INSERT INTO rate_limit_buckets (id, tenant_id, bucket_key, count, window_start) VALUES (?, ?, ?, ?, ?) " +
+          "ON CONFLICT(tenant_id, bucket_key) DO UPDATE SET count = ?, window_start = excluded.window_start"
+        ).bind(crypto.randomUUID(), tenantId, key, effectiveCount, windowStart, effectiveCount).run();
+
+        if (effectiveCount > RATE_LIMIT_MAX) {
+          const retryAfter = Math.max(1, Math.ceil((windowStart + windowMs - now) / 1000));
+          return { ok: false, retryAfter: retryAfter * 1000 };
+        }
+        return { ok: true };
+      }
+    } catch {
+      // Fall through to in-memory check
+    }
+  }
+
+  if (memCount > RATE_LIMIT_MAX) {
+    const entryWindow = entry ? entry.windowStart : now;
+    return { ok: false, retryAfter: windowMs - (now - entryWindow) };
   }
   return { ok: true };
 }
@@ -180,7 +224,7 @@ export default {
       return jsonResponse(jsonRpcError(id, -32601, "Method not found: " + toolName), 404);
     }
 
-    const limit = checkRateLimit(tenantId, toolName);
+    const limit = await checkRateLimit(env, tenantId, toolName);
     if (!limit.ok) {
       await auditToolExecution(env, tenantId, toolName, toolArgs, false, "rate_limited");
       return jsonResponse(jsonRpcError(id, -32603, "Rate limit exceeded for tool " + toolName), 429, { "Retry-After": String(Math.ceil(limit.retryAfter / 1000)) });

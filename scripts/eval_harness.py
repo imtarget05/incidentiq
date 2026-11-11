@@ -425,8 +425,13 @@ def evaluate(cases, client, env) -> Dict[str, Any]:
 
 # --------------------------------------------------------------------------- main
 
-def main_eval(live_url: str | None) -> None:
-    cases = golden_cases()
+def main_eval(live_url: str | None, dataset_path: str | None = None) -> None:
+    dataset_file = dataset_path or os.path.join(os.path.dirname(__file__), "..", "data", "rag_eval_dataset.json")
+    if os.path.exists(dataset_file):
+        with open(dataset_file, encoding="utf-8") as f:
+            cases = json.load(f)
+    else:
+        cases = golden_cases()
     assert len(cases) >= 30, len(cases)
     assert sum(1 for c in cases if c["expected_status"] == "insufficient_evidence") >= 10
 
@@ -462,6 +467,26 @@ def main_eval(live_url: str | None) -> None:
         client = TestClient(main.app)
         metrics = evaluate(cases, client, env)
 
+        # Record evaluation metrics into datamart (rag_eval_runs table)
+        import asyncio
+        async def _save_eval():
+            for metric_name, val in [
+                ("recall@5", metrics.get("recall_at_5", 0.0)),
+                ("mrr", metrics.get("mrr_proxy", 0.0)),
+                ("correctness", metrics.get("correctness", 0.0)),
+                ("faithfulness", metrics.get("citation_validity", 0.0)),
+            ]:
+                try:
+                    res = env.DB.prepare(
+                        "INSERT INTO rag_eval_runs (id, tenant_id, dataset, metric, value, sample_size, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)"
+                    ).bind(str(main.uuid.uuid4()), "t1", "golden_dataset_v1", metric_name, float(val), len(cases), main._now_ms()).run()
+                    if hasattr(res, "__await__"):
+                        await res
+                except Exception:
+                    pass
+        asyncio.run(_save_eval())
+
     os.makedirs("docs", exist_ok=True)
     lines = [
         "# IncidentIQ — Evaluation Results",
@@ -493,5 +518,6 @@ def main_eval(live_url: str | None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", default=None, help="Deployed worker base URL for live smoke test")
+    parser.add_argument("--dataset", default=None, help="Path to golden dataset JSON file")
     args = parser.parse_args()
-    main_eval(args.live)
+    main_eval(args.live, args.dataset)

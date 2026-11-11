@@ -19,6 +19,7 @@ def create_tenant(name: str, api_key: str) -> Dict[str, Any]:
         "INSERT INTO tenants (name, api_key_prefix, api_key_hash) "
         "VALUES (%s, %s, %s) RETURNING id, name, api_key_prefix, is_active, created_at",
         (name, prefix, api_key_hash),
+        commit=True,
     )
 
 
@@ -48,6 +49,7 @@ def create_asset(tenant_id: str, payload: dict) -> Dict[str, Any]:
             payload.get("environment", "production"),
             payload.get("is_active", True),
         ),
+        commit=True,
     )
 
 
@@ -100,6 +102,7 @@ def update_asset(
         f"UPDATE assets SET {', '.join(sets)} WHERE id = %s AND tenant_id = %s "
         f"RETURNING id, tenant_id, name, type, ip_address, environment, is_active, created_at, updated_at",
         tuple(params),
+        commit=True,
     )
 
 
@@ -131,6 +134,7 @@ def create_vulnerability(tenant_id: str, payload: dict) -> Dict[str, Any]:
             payload.get("status", "open"),
             payload.get("description"),
         ),
+        commit=True,
     )
 
 
@@ -181,6 +185,7 @@ def create_alert(tenant_id: str, payload: dict) -> Dict[str, Any]:
             payload["title"],
             payload.get("description"),
         ),
+        commit=True,
     )
 
 
@@ -237,6 +242,7 @@ def update_alert(
         f"UPDATE alerts SET {', '.join(sets)} WHERE id = %s AND tenant_id = %s "
         f"RETURNING id, tenant_id, asset_id, vulnerability_id, severity, status, title, description, created_at, resolved_at",
         tuple(params),
+        commit=True,
     )
 
 
@@ -266,6 +272,7 @@ def create_incident(tenant_id: str, payload: dict) -> Dict[str, Any]:
             payload["service"],
             payload["environment"],
         ),
+        commit=True,
     )
 
 
@@ -324,7 +331,7 @@ def update_incident_status(
             "WHERE id = %s AND tenant_id = %s "
             "RETURNING id, tenant_id, title, severity, status, service, environment, created_at, updated_at, resolved_at"
         )
-    return fetch_one(sql, tuple(params))
+    return fetch_one(sql, tuple(params), commit=True)
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +350,7 @@ def create_scan_result(tenant_id: str, payload: dict) -> Dict[str, Any]:
             payload["scan_type"],
             payload.get("findings_count", 0),
         ),
+        commit=True,
     )
 
 

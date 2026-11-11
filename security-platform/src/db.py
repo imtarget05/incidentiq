@@ -52,25 +52,42 @@ def run_migration(sql_path: str) -> None:
         put_conn(conn)
 
 
-def fetch_all(sql: str, params: Optional[tuple] = None) -> List[Dict[str, Any]]:
-    """Execute a SELECT and return rows as dicts."""
+def fetch_all(
+    sql: str, params: Optional[tuple] = None, commit: bool = False
+) -> List[Dict[str, Any]]:
+    """Execute a query and return rows as dicts.
+
+    Set commit=True for write queries (e.g. INSERT ... RETURNING) so the
+    transaction is persisted before the connection returns to the pool.
+    """
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params or ())
-            return [dict(r) for r in cur.fetchall()]
+            rows = [dict(r) for r in cur.fetchall()]
+        if commit:
+            conn.commit()
+        return rows
     finally:
         put_conn(conn)
 
 
-def fetch_one(sql: str, params: Optional[tuple] = None) -> Optional[Dict[str, Any]]:
-    """Execute a SELECT and return a single row as a dict."""
+def fetch_one(
+    sql: str, params: Optional[tuple] = None, commit: bool = False
+) -> Optional[Dict[str, Any]]:
+    """Execute a query and return a single row as a dict.
+
+    Set commit=True for write queries (e.g. INSERT ... RETURNING) so the
+    transaction is persisted before the connection returns to the pool.
+    """
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params or ())
             row = cur.fetchone()
-            return dict(row) if row else None
+        if commit:
+            conn.commit()
+        return dict(row) if row else None
     finally:
         put_conn(conn)
 

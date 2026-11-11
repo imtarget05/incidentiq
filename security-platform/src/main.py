@@ -27,8 +27,16 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+)
 from psycopg2.errors import UniqueViolation
 
 from db import get_conn, put_conn, run_migration
@@ -205,12 +213,12 @@ def update_asset_endpoint(
     return asset
 
 
-@app.delete("/api/v1/assets/{asset_id}", status_code=204, tags=["Assets"])
-def delete_asset_endpoint(request: Request, asset_id: str = Path(...)) -> Any:
+@app.delete("/api/v1/assets/{asset_id}", tags=["Assets"])
+def delete_asset_endpoint(request: Request, asset_id: str = Path(...)) -> Response:
     tenant = require_tenant(request)
     if not delete_asset(asset_id, tenant["id"]):
         raise HTTPException(status_code=404, detail="asset not found")
-    return JSONResponse(status_code=204, content=None)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -309,12 +317,12 @@ def update_alert_endpoint(
     return alert
 
 
-@app.delete("/api/v1/alerts/{alert_id}", status_code=204, tags=["Alerts"])
-def delete_alert_endpoint(request: Request, alert_id: str = Path(...)) -> Any:
+@app.delete("/api/v1/alerts/{alert_id}", tags=["Alerts"])
+def delete_alert_endpoint(request: Request, alert_id: str = Path(...)) -> Response:
     tenant = require_tenant(request)
     if not delete_alert(alert_id, tenant["id"]):
         raise HTTPException(status_code=404, detail="alert not found")
-    return JSONResponse(status_code=204, content=None)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------

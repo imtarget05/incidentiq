@@ -45,6 +45,36 @@ The seed database includes three tenants (`acme_live`, `globex_live`, `soylent_l
 with assets, vulnerabilities, alerts, incidents, scan results, and audit logs —
 tenant-isolated so one tenant never sees another's data.
 
+## Google Sign-In (OAuth2)
+
+`security-platform` supports Google Sign-In via OAuth2 for production-grade user
+authentication. Two endpoints are provided under `/auth`:
+
+- `GET /auth/google/authorize` — redirects the user to Google's consent screen.
+- `GET /auth/google/callback` — exchanges the authorization code, verifies the Google
+  ID token, creates/links a tenant + user, and returns a signed JWT session token.
+
+Required environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_CLIENT_ID` | Google OAuth2 client ID (from `client_secret_*.json`) |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth2 client secret (from `client_secret_*.json`) |
+| `GOOGLE_REDIRECT_URI` | Redirect URI registered in Google Cloud Console (default: `http://localhost:8000/auth/google/callback`) |
+| `JWT_SECRET_KEY` | Secret used to sign session JWTs (change in production) |
+
+Flow:
+
+1. Client calls `GET /auth/google/authorize` → redirected to Google.
+2. User signs in and consents → Google redirects back to `/auth/google/callback?code=...`.
+3. Server exchanges the code for an ID token, verifies the signature/audience,
+   creates or links a tenant + user, and returns `{"access_token": "..."}`.
+4. Client sends `Authorization: Bearer <access_token>` on subsequent API requests.
+   Endpoints resolve the tenant from the JWT (falling back to `X-Api-Key`).
+
+All credential files (`client_secret_*.json`, `*_api_key.txt`, `.env`) are gitignored
+and must never be committed.
+
 ## API docs
 
 OpenAPI spec: `security-platform/openapi.yaml` (servable by any Swagger UI).

@@ -51,7 +51,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r security-platform/requirements.txt
-          pip install -r security-platform/requirements.txt 2>/dev/null || true
           pip install pytest pytest-asyncio httpx ruff
 
       - name: Run migrations against Postgres
@@ -59,7 +58,8 @@ jobs:
           cd security-platform
           python -c "
 from db import run_migration
-run_migration('migrations/0001_initial.sql')
+for path in ['migrations/0001_initial.sql', 'migrations/0002_add_users_table.sql']:
+    run_migration(path)
 print('migrations applied')
 "
         env:

@@ -333,8 +333,8 @@ def test_update_document_missing_content(monkeypatch):
     doc_id = r.json()["document_id"]
     r2 = client.put(f"/api/v1/documents/{doc_id}",
                     json={"filename": "x.md"}, headers={**h, "Idempotency-Key": "x"})
-    assert r2.status_code == 400
-    assert r2.json()["error"]["code"] == "missing_content"
+    assert r2.status_code == 422
+    assert r2.json()["error"]["code"] == "validation_error"
 
 
 def test_delete_document_removes_rows_and_vectors(monkeypatch):

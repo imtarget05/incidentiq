@@ -69,23 +69,59 @@ function validateInput(tool: string, params: unknown): { ok: true; params: Recor
   return { ok: true, params: p };
 }
 
-const rateLimitStore = new Map<string, { count: number; windowStart: number }>();
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-function checkRateLimit(tenantId: string, tool: string): { ok: true } | { ok: false; retryAfter: number } {
-  const key = tenantId + ":" + tool;
+// D1-backed fixed-window rate limiter. Window start is floored to the window
+// boundary so counts are consistent across isolates; the bucket lives in the
+// `rate_limit_buckets` table (UNIQUE(tenant_id, bucket_key), migrations/002).
+// Shape mirrors api/src/main.py `_ai_rate_limit`: single atomic upsert with
+// RETURNING when the runtime supports it, otherwise select-then-upsert; any
+// D1 failure fails OPEN (never blocks tool traffic) with a structured log.
+async function checkRateLimit(env: Env, tenantId: string, tool: string): Promise<{ ok: true } | { ok: false; retryAfter: number }> {
+  const bucketKey = "mcp:" + tool;
   const now = Date.now();
-  const entry = rateLimitStore.get(key);
-  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
-    rateLimitStore.set(key, { count: 1, windowStart: now });
+  const windowStart = now - (now % RATE_LIMIT_WINDOW_MS);
+  try {
+    try {
+      const row = await env.DB.prepare(
+        "INSERT INTO rate_limit_buckets (id, tenant_id, bucket_key, count, window_start) VALUES (?, ?, ?, 1, ?) " +
+        "ON CONFLICT(tenant_id, bucket_key) DO UPDATE SET " +
+        "count = CASE WHEN window_start = excluded.window_start THEN count + 1 ELSE 1 END, " +
+        "window_start = excluded.window_start " +
+        "RETURNING count, window_start"
+      ).bind(crypto.randomUUID(), tenantId, bucketKey, windowStart).first() as Record<string, unknown> | null;
+      if (row) {
+        const count = Number(row.count ?? 1);
+        const rowWindow = Number(row.window_start ?? windowStart);
+        if (rowWindow === windowStart && count > RATE_LIMIT_MAX) {
+          return { ok: false, retryAfter: windowStart + RATE_LIMIT_WINDOW_MS - now };
+        }
+        return { ok: true };
+      }
+    } catch {
+      // RETURNING unsupported or transient error: fall back to the two-statement path.
+    }
+    const existing = await env.DB.prepare(
+      "SELECT count, window_start FROM rate_limit_buckets WHERE tenant_id = ? AND bucket_key = ?"
+    ).bind(tenantId, bucketKey).first() as Record<string, unknown> | null;
+    let count = 0;
+    if (existing) {
+      count = Number(existing.count ?? 0);
+      if (Number(existing.window_start ?? 0) !== windowStart) count = 0; // new window resets
+    }
+    if (count >= RATE_LIMIT_MAX) {
+      return { ok: false, retryAfter: windowStart + RATE_LIMIT_WINDOW_MS - now };
+    }
+    await env.DB.prepare(
+      "INSERT INTO rate_limit_buckets (id, tenant_id, bucket_key, count, window_start) VALUES (?, ?, ?, ?, ?) " +
+      "ON CONFLICT(tenant_id, bucket_key) DO UPDATE SET count = count + 1, window_start = excluded.window_start"
+    ).bind(crypto.randomUUID(), tenantId, bucketKey, count + 1, windowStart).run();
     return { ok: true };
+  } catch (err) {
+    console.warn(JSON.stringify({ event: "rate_limit.db_error", tenant_id: tenantId, tool, error: err instanceof Error ? err.name : String(err) }));
+    return { ok: true }; // fail open
   }
-  entry.count += 1;
-  if (entry.count > RATE_LIMIT_MAX) {
-    return { ok: false, retryAfter: RATE_LIMIT_WINDOW_MS - (now - entry.windowStart) };
-  }
-  return { ok: true };
 }
 
 async function auditToolExecution(env: Env, tenantId: string, tool: string, params: Record<string, unknown>, success: boolean, error?: string): Promise<void> {
@@ -180,7 +216,7 @@ export default {
       return jsonResponse(jsonRpcError(id, -32601, "Method not found: " + toolName), 404);
     }
 
-    const limit = checkRateLimit(tenantId, toolName);
+    const limit = await checkRateLimit(env, tenantId, toolName);
     if (!limit.ok) {
       await auditToolExecution(env, tenantId, toolName, toolArgs, false, "rate_limited");
       return jsonResponse(jsonRpcError(id, -32603, "Rate limit exceeded for tool " + toolName), 429, { "Retry-After": String(Math.ceil(limit.retryAfter / 1000)) });

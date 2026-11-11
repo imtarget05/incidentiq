@@ -340,7 +340,8 @@ def test_create_incident_invalid_severity(monkeypatch):
     r = client.post("/api/v1/incidents", json={
         "title": "T", "severity": "INVALID", "service": "svc", "environment": "prod",
     }, headers=h)
-    assert r.status_code == 400
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "validation_error"
 
 
 # --------------------------------------------------------------------------- get

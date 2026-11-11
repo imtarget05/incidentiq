@@ -20,6 +20,8 @@ class SqliteD1:
         db = self
 
         class Statement:
+            args: tuple = ()
+
             def bind(self, *args):
                 self.args = args
                 return self
@@ -32,6 +34,10 @@ class SqliteD1:
                         db.release.set()
                     await db.release.wait()
                 return dict(row) if row else None
+
+            async def all(self):
+                rows = db.connection.execute(sql, self.args).fetchall()
+                return [dict(r) for r in rows]
 
             async def run(self):
                 db.connection.execute(sql, self.args)

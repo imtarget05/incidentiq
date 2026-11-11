@@ -18,4 +18,6 @@ binding = "AI"
 enabled = true
 
 [vars]
-API_WORKER_URL = "https://ai-knowledge-platform.tanmainguyenbinh.workers.dev"
+# Hybrid Option B: MCP calls the IncidentIQ backend on Azure Container Apps.
+# Set to the Azure Container App FQDN per environment (preview/production).
+API_WORKER_URL = "REPLACE_WITH_AZURE_BACKEND_URL"

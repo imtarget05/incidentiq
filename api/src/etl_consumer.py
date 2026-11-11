@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from workers import WorkerEntrypoint
 
-from etl import handle_queue_message
+from etl import _circuit_record_failure, coerce_payload, handle_queue_message
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +29,14 @@ class Default(WorkerEntrypoint):
                 await handle_queue_message(runtime_env, message)
             except Exception as exc:
                 logger.error("etl.consumer.error: %s", exc)
+                # Attribute the crash to a tenant circuit when the body parses;
+                # unparseable messages cannot be attributed and skip recording.
+                try:
+                    tenant_id = coerce_payload(message.body).get("tenant_id")
+                    if tenant_id:
+                        await _circuit_record_failure(runtime_env, f"etl:{tenant_id}")
+                except Exception:
+                    pass
                 try:
                     retried = message.retry()
                     if inspect.isawaitable(retried):

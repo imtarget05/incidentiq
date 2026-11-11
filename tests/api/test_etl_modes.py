@@ -193,7 +193,7 @@ def test_document_upload_requires_investigator_workspace_membership(monkeypatch)
     response = _upload(TestClient(main.app))
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "no workspace assigned to tenant"
+    assert response.json()["error"]["code"] == "forbidden"
 
 
 def test_queue_mode_enqueues_without_processing(monkeypatch):

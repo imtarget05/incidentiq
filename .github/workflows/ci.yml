@@ -81,6 +81,7 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=incidentiq
+            -Dsonar.organization=imtarget05
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
             -Dsonar.python.coverage.reportPaths=coverage.xml

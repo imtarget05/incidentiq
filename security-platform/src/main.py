@@ -40,7 +40,11 @@ from fastapi import (
 from psycopg2.errors import UniqueViolation
 
 from db import get_conn, put_conn, run_migration, health_check
-from auth.google_oauth import router as auth_router, get_current_user
+from auth.google_oauth import (
+    router as auth_router,
+    get_current_user,
+    get_current_user_optional,
+)
 from models import (
     AlertCreate,
     AlertOut,
@@ -143,6 +147,16 @@ def require_tenant(request: Request) -> Dict[str, Any]:
     return tenant
 
 
+def get_current_tenant(
+    request: Request,
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
+) -> Dict[str, Any]:
+    """Resolve tenant from JWT (Google OAuth2) or fall back to API key."""
+    if current_user:
+        return {"id": current_user["tenant_id"], "name": current_user["email"]}
+    return require_tenant(request)
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -185,7 +199,7 @@ def list_assets_endpoint(
     offset: int = Query(default=0, ge=0),
     is_active: Optional[bool] = Query(default=None),
 ) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     rows, _total = list_assets(
         tenant["id"], limit=limit, offset=offset, is_active=is_active
     )
@@ -194,13 +208,13 @@ def list_assets_endpoint(
 
 @app.post("/api/v1/assets", response_model=AssetOut, status_code=201, tags=["Assets"])
 def create_asset_endpoint(request: Request, payload: AssetCreate) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     return create_asset(tenant["id"], payload.model_dump())
 
 
 @app.get("/api/v1/assets/{asset_id}", response_model=AssetOut, tags=["Assets"])
 def get_asset_endpoint(request: Request, asset_id: str = Path(...)) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     asset = get_asset(asset_id, tenant["id"])
     if asset is None:
         raise HTTPException(status_code=404, detail="asset not found")
@@ -213,7 +227,7 @@ def update_asset_endpoint(
     asset_id: str = Path(...),
     payload: AssetUpdate = None,
 ) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     if payload is None:
         raise HTTPException(status_code=400, detail="request body is required")
     asset = update_asset(asset_id, tenant["id"], payload.model_dump(exclude_unset=True))
@@ -224,7 +238,7 @@ def update_asset_endpoint(
 
 @app.delete("/api/v1/assets/{asset_id}", tags=["Assets"])
 def delete_asset_endpoint(request: Request, asset_id: str = Path(...)) -> Response:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     if not delete_asset(asset_id, tenant["id"]):
         raise HTTPException(status_code=404, detail="asset not found")
     return Response(status_code=204)
@@ -247,7 +261,7 @@ def list_vulnerabilities_endpoint(
     severity: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
 ) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     rows, _ = list_vulnerabilities(
         tenant["id"], limit=limit, offset=offset, severity=severity, status=status
     )
@@ -263,7 +277,7 @@ def list_vulnerabilities_endpoint(
 def create_vulnerability_endpoint(
     request: Request, payload: VulnerabilityCreate
 ) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     return create_vulnerability(tenant["id"], payload.model_dump())
 
 
@@ -280,7 +294,7 @@ def list_alerts_endpoint(
     severity: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
 ) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     rows, _ = list_alerts(
         tenant["id"], limit=limit, offset=offset, severity=severity, status=status
     )
@@ -289,7 +303,7 @@ def list_alerts_endpoint(
 
 @app.post("/api/v1/alerts", response_model=AlertOut, status_code=201, tags=["Alerts"])
 def create_alert_endpoint(request: Request, payload: AlertCreate) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     alert = create_alert(tenant["id"], payload.model_dump())
     write_audit_log(
         tenant["id"],
@@ -303,7 +317,7 @@ def create_alert_endpoint(request: Request, payload: AlertCreate) -> Any:
 
 @app.get("/api/v1/alerts/{alert_id}", response_model=AlertOut, tags=["Alerts"])
 def get_alert_endpoint(request: Request, alert_id: str = Path(...)) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     alert = get_alert(alert_id, tenant["id"])
     if alert is None:
         raise HTTPException(status_code=404, detail="alert not found")
@@ -316,7 +330,7 @@ def update_alert_endpoint(
     alert_id: str = Path(...),
     payload: AlertUpdate = None,
 ) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     if payload is None:
         raise HTTPException(status_code=400, detail="request body is required")
     alert = update_alert(alert_id, tenant["id"], payload.model_dump(exclude_unset=True))
@@ -330,7 +344,7 @@ def update_alert_endpoint(
 
 @app.delete("/api/v1/alerts/{alert_id}", tags=["Alerts"])
 def delete_alert_endpoint(request: Request, alert_id: str = Path(...)) -> Response:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     if not delete_alert(alert_id, tenant["id"]):
         raise HTTPException(status_code=404, detail="alert not found")
     return Response(status_code=204)
@@ -349,7 +363,7 @@ def list_incidents_endpoint(
     severity: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
 ) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     rows, _ = list_incidents(
         tenant["id"], limit=limit, offset=offset, severity=severity, status=status
     )
@@ -360,7 +374,7 @@ def list_incidents_endpoint(
     "/api/v1/incidents", response_model=IncidentOut, status_code=201, tags=["Incidents"]
 )
 def create_incident_endpoint(request: Request, payload: IncidentCreate) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     incident = create_incident(tenant["id"], payload.model_dump())
     write_audit_log(
         tenant["id"],
@@ -376,7 +390,7 @@ def create_incident_endpoint(request: Request, payload: IncidentCreate) -> Any:
     "/api/v1/incidents/{incident_id}", response_model=IncidentOut, tags=["Incidents"]
 )
 def get_incident_endpoint(request: Request, incident_id: str = Path(...)) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     incident = get_incident(incident_id, tenant["id"])
     if incident is None:
         raise HTTPException(status_code=404, detail="incident not found")
@@ -393,7 +407,7 @@ def update_incident_status_endpoint(
     incident_id: str = Path(...),
     payload: IncidentUpdate = None,
 ) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     if payload is None or payload.status is None:
         raise HTTPException(status_code=400, detail="status field is required")
     incident = update_incident_status(incident_id, tenant["id"], payload.status)
@@ -422,7 +436,7 @@ def list_scan_results_endpoint(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -445,5 +459,5 @@ def list_scan_results_endpoint(
     tags=["Scan Results"],
 )
 def create_scan_result_endpoint(request: Request, payload: ScanResultCreate) -> Any:
-    tenant = require_tenant(request)
+    tenant = get_current_tenant(request)
     return create_scan_result(tenant["id"], payload.model_dump())

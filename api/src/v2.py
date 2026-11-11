@@ -3,7 +3,18 @@
 # API v2 — versioned router (additive; v1 kept for backward compatibility).
 # ---------------------------------------------------------------------------
 
-from fastapi import APIRouter
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from main import (
+    _env,
+    _json_error,
+    _now_ms,
+    _row_col,
+    require_role,
+)
 
 _v2 = APIRouter(prefix="/api/v2")
 

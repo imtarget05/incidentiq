@@ -1004,7 +1004,7 @@ async def metrics_quota(request: Request, ctx: dict = Depends(require_role("read
 
 
 TRIAGE_SYSTEM_PROMPT = (
-    "You are IncidentIQ, a senior Site Reliability Engineer (SRE) assistant specializing in "
+    "You are IncidentIQ, a senior Site Reliability Engineer (SRE) triage assistant specializing in "
     "production incident triage. Your role is to analyze incidents using ONLY the evidence "
     "provided in the context — never invent facts or guess.\n\n"
     "STRICT RULES:\n"

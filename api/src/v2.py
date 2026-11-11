@@ -3,9 +3,9 @@
 # API v2 — versioned router (additive; v1 kept for backward compatibility).
 # ---------------------------------------------------------------------------
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from main import (

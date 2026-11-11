@@ -1,0 +1,85 @@
+# ============================================
+# Compliance & Post-Deploy Verification - IncidentIQ
+# Runs after CD Pipeline completes or weekly.
+# Verifies the live production deployment (Cloudflare edge + Azure backend) is healthy.
+# ============================================
+
+name: Compliance & Verification - IncidentIQ
+
+on:
+  workflow_run:
+    workflows: ["CD Pipeline - IncidentIQ"]
+    types: [completed]
+  schedule:
+    - cron: '0 6 * * 1'  # Every Monday at 6:00 UTC
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - verify
+
+env:
+  PROD_API_WORKER_URL: ${{ vars.PROD_API_WORKER_URL }}
+  PROD_MCP_WORKER_URL: ${{ vars.PROD_MCP_WORKER_URL }}
+  AZURE_BACKEND_URL: ${{ vars.AZURE_BACKEND_URL }}
+  AZURE_EDGE_SECRET: ${{ secrets.AZURE_EDGE_SECRET }}
+  PROD_SMOKE_API_KEY: ${{ secrets.PROD_SMOKE_API_KEY }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify-production:
+    name: "Verify Production Deployment"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'schedule') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'verify')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Cloudflare free tier can take a moment to wake up; retry generously.
+      - name: Verify Cloudflare edge /health/live
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "${PROD_API_WORKER_URL}/health/live" || echo "000")
+          echo "CF /health/live -> $code"
+          [ "$code" = "200" ] || { echo "::error::Cloudflare /health/live unhealthy (HTTP $code)"; exit 1; }
+
+      - name: Verify Cloudflare edge /health/ready
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "${PROD_API_WORKER_URL}/health/ready" || echo "000")
+          echo "CF /health/ready -> $code"
+          [ "$code" = "200" ] || { echo "::error::Cloudflare /health/ready unhealthy (HTTP $code)"; exit 1; }
+
+      - name: Verify Cloudflare MCP tools/list
+        run: |
+          response="$(curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer ${PROD_SMOKE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+            "${PROD_MCP_WORKER_URL}/mcp")"
+          python3 -c 'import json,sys; names={x["name"] for x in json.loads(sys.argv[1])["result"]["tools"]}; assert {"search_runbooks","get_incident","get_triage_report"} <= names, f"Missing tools: {names}"' "$response"
+
+      - name: Verify Azure backend /health/live
+        if: env.AZURE_BACKEND_URL != '' && env.AZURE_EDGE_SECRET != ''
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            -H "X-Edge-Secret: ${AZURE_EDGE_SECRET}" \
+            "${AZURE_BACKEND_URL}/health/live" || echo "000")
+          echo "Azure /health/live -> $code"
+          [ "$code" = "200" ] || { echo "::error::Azure /health/live unhealthy (HTTP $code)"; exit 1; }
+
+      - name: Verify Azure backend /health/ready
+        if: env.AZURE_BACKEND_URL != '' && env.AZURE_EDGE_SECRET != ''
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            -H "X-Edge-Secret: ${AZURE_EDGE_SECRET}" \
+            "${AZURE_BACKEND_URL}/health/ready" || echo "000")
+          echo "Azure /health/ready -> $code"
+          [ "$code" = "200" ] || { echo "::error::Azure /health/ready unhealthy (HTTP $code)"; exit 1; }

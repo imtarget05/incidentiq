@@ -24,6 +24,11 @@ build/
 .DS_Store
 Thumbs.db
 
+# Google OAuth / API credentials (never commit secrets)
+client_secret_*.json
+*_api_key.txt
+*.googleusercontent.com.json
+
 # Wrangler
 .wrangler/
 .dev.vars

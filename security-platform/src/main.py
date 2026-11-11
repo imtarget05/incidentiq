@@ -28,6 +28,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import (
+    Depends,
     FastAPI,
     Header,
     HTTPException,
@@ -39,6 +40,7 @@ from fastapi import (
 from psycopg2.errors import UniqueViolation
 
 from db import get_conn, put_conn, run_migration, health_check
+from auth.google_oauth import router as auth_router, get_current_user
 from models import (
     AlertCreate,
     AlertOut,
@@ -79,9 +81,13 @@ from queries import (
 )
 from security import authenticate_tenant
 
-MIGRATION_PATH = "migrations/0001_initial.sql"
+MIGRATION_PATHS = [
+    "migrations/0001_initial.sql",
+    "migrations/0002_add_users_table.sql",
+]
 
 app = FastAPI(title="Cybersecurity Dashboard API", version="1.0.0")
+app.include_router(auth_router)
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +99,8 @@ app = FastAPI(title="Cybersecurity Dashboard API", version="1.0.0")
 def _startup() -> None:
     if not health_check():
         raise RuntimeError("security-platform: cannot connect to database on startup")
-    run_migration(MIGRATION_PATH)
+    for migration_path in MIGRATION_PATHS:
+        run_migration(migration_path)
 
 
 # ---------------------------------------------------------------------------

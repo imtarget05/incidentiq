@@ -1,0 +1,532 @@
+openapi: 3.0.3
+info:
+  title: Cybersecurity Dashboard API
+  version: 1.0.0
+  description: |
+    RESTful API for the Cybersecurity Dashboard backend (Security Platform &
+    Data Services). PostgreSQL-backed, tenant-isolated via API key hash.
+  contact:
+    name: Backend Engineering
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:8000
+    description: Local development
+tags:
+  - name: Health
+  - name: Tenants
+  - name: Assets
+  - name: Vulnerabilities
+  - name: Alerts
+  - name: Incidents
+  - name: Scan Results
+security:
+  - ApiKeyAuth: []
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  service:
+                    type: string
+  /api/v1/tenants:
+    post:
+      summary: Register a new tenant with an API key
+      tags: [Tenants]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, api_key]
+              properties:
+                name:
+                  type: string
+                  example: Acme Corp
+                api_key:
+                  type: string
+                  example: acme_live_abcd1234
+      responses:
+        "200":
+          description: Tenant created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantOut"
+        "409":
+          description: Tenant name or API key prefix already exists
+  /api/v1/assets:
+    get:
+      summary: List tenant assets
+      tags: [Assets]
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, default: 50, maximum: 100}
+        - name: offset
+          in: query
+          schema: {type: integer, default: 0}
+        - name: is_active
+          in: query
+          schema: {type: boolean}
+      responses:
+        "200":
+          description: List of assets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: $ref: "#/components/schemas/AssetOut"
+    post:
+      summary: Create an asset
+      tags: [Assets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssetCreate"
+      responses:
+        "201":
+          description: Asset created
+          content:
+            application/json:
+              schema: $ref: "#/components/schemas/AssetOut"
+  /api/v1/assets/{asset_id}:
+    get:
+      summary: Get an asset by ID
+      tags: [Assets]
+      parameters:
+        - name: asset_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Asset found
+          content:
+            application/json:
+              schema: $ref: "#/components/schemas/AssetOut"
+        "404":
+          description: Asset not found
+    put:
+      summary: Update an asset
+      tags: [Assets]
+      parameters:
+        - name: asset_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        content:
+          application/json:
+            schema: $ref: "#/components/schemas/AssetUpdate"
+      responses:
+        "200":
+          description: Asset updated
+          content:
+            application/json:
+              schema: $ref: "#/components/schemas/AssetOut"
+    delete:
+      summary: Delete an asset
+      tags: [Assets]
+      parameters:
+        - name: asset_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "204":
+          description: Asset deleted
+        "404":
+          description: Asset not found
+  /api/v1/vulnerabilities:
+    get:
+      summary: List tenant vulnerabilities
+      tags: [Vulnerabilities]
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, default: 50, maximum: 100}
+        - name: offset
+          in: query
+          schema: {type: integer, default: 0}
+        - name: severity
+          in: query
+          schema: {type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL]}
+        - name: status
+          in: query
+          schema: {type: string, enum: [open, in_progress, remediated, false_positive]}
+      responses:
+        "200":
+          description: List of vulnerabilities
+          content:
+            application/json:
+              schema:
+                type: array
+                items: $ref: "#/components/schemas/VulnerabilityOut"
+    post:
+      summary: Create a vulnerability
+      tags: [Vulnerabilities]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: $ref: "#/components/schemas/VulnerabilityCreate"
+      responses:
+        "201":
+          description: Vulnerability created
+          content:
+            application/json:
+              schema: $ref: "#/components/schemas/VulnerabilityOut"
+  /api/v1/alerts:
+    get:
+      summary: List tenant alerts
+      tags: [Alerts]
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, default: 50, maximum: 100}
+        - name: offset
+          in: query
+          schema: {type: integer, default: 0}
+        - name: severity
+          in: query
+          schema: {type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL]}
+        - name: status
+          in: query
+          schema: {type: string, enum: [new, acknowledged, resolved, dismissed]}
+      responses:
+        "200":
+          description: List of alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: $ref: "#/components/schemas/AlertOut"
+    post:
+      summary: Create an alert
+      tags: [Alerts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: $ref: "#/components/schemas/AlertCreate"
+      responses:
+        "201":
+          description: Alert created
+          content:
+            application/json:
+              schema: $ref: "#/components/schemas/AlertOut"
+  /api/v1/alerts/{alert_id}:
+    get:
+      summary: Get an alert by ID
+      tags: [Alerts]
+      parameters:
+        - name: alert_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Alert found
+          content:
+            application/json:
+              schema: $ref: "#/components/schemas/AlertOut"
+        "404":
+          description: Alert not found
+    put:
+      summary: Update an alert
+      tags: [Alerts]
+      parameters:
+        - name: alert_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        content:
+          application/json:
+            schema: $ref: "#/components/schemas/AlertUpdate"
+      responses:
+        "200":
+          description: Alert updated
+          content:
+            application/json:
+              schema: $ref: "#/components/schemas/AlertOut"
+    delete:
+      summary: Delete an alert
+      tags: [Alerts]
+      parameters:
+        - name: alert_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "204":
+          description: Alert deleted
+        "404":
+          description: Alert not found
+  /api/v1/incidents:
+    get:
+      summary: List tenant incidents
+      tags: [Incidents]
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, default: 50, maximum: 100}
+        - name: offset
+          in: query
+          schema: {type: integer, default: 0}
+        - name: severity
+          in: query
+          schema: {type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL]}
+        - name: status
+          in: query
+          schema: {type: string, enum: [open, investigating, resolved]}
+      responses:
+        "200":
+          description: List of incidents
+          content:
+            application/json:
+              schema:
+                type: array
+                items: $ref: "#/components/schemas/IncidentOut"
+    post:
+      summary: Create an incident
+      tags: [Incidents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: $ref: "#/components/schemas/IncidentCreate"
+      responses:
+        "201":
+          description: Incident created
+          content:
+            application/json:
+              schema: $ref: "#/components/schemas/IncidentOut"
+  /api/v1/incidents/{incident_id}:
+    get:
+      summary: Get an incident by ID
+      tags: [Incidents]
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Incident found
+          content:
+            application/json:
+              schema: $ref: "#/components/schemas/IncidentOut"
+        "404":
+          description: Incident not found
+  /api/v1/incidents/{incident_id}/status:
+    put:
+      summary: Update incident status
+      tags: [Incidents]
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: $ref: "#/components/schemas/IncidentUpdate"
+      responses:
+        "200":
+          description: Incident status updated
+          content:
+            application/json:
+              schema: $ref: "#/components/schemas/IncidentOut"
+        "404":
+          description: Incident not found
+  /api/v1/scan-results:
+    get:
+      summary: List tenant scan results
+      tags: [Scan Results]
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, default: 50, maximum: 100}
+        - name: offset
+          in: query
+          schema: {type: integer, default: 0}
+      responses:
+        "200":
+          description: List of scan results
+          content:
+            application/json:
+              schema:
+                type: array
+                items: $ref: "#/components/schemas/ScanResultOut"
+    post:
+      summary: Create a scan result
+      tags: [Scan Results]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: $ref: "#/components/schemas/ScanResultCreate"
+      responses:
+        "201":
+          description: Scan result created
+          content:
+            application/json:
+              schema: $ref: "#/components/schemas/ScanResultOut"
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: Tenant API key. SHA-256 hash stored server-side.
+  schemas:
+    TenantOut:
+      type: object
+      required: [id, name, api_key_prefix, is_active, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        api_key_prefix: {type: string}
+        is_active: {type: boolean}
+        created_at: {type: string, format: date-time}
+    AssetCreate:
+      type: object
+      required: [name, type]
+      properties:
+        name: {type: string, example: web-prod-01}
+        type: {type: string, example: server}
+        ip_address: {type: string, example: 10.0.1.10}
+        environment: {type: string, default: production}
+        is_active: {type: boolean, default: true}
+    AssetUpdate:
+      type: object
+      properties:
+        name: {type: string}
+        type: {type: string}
+        ip_address: {type: string}
+        environment: {type: string}
+        is_active: {type: boolean}
+    AssetOut:
+      allOf:
+        - $ref: "#/components/schemas/AssetCreate"
+        - type: object
+          properties:
+            id: {type: string, format: uuid}
+            tenant_id: {type: string, format: uuid}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    VulnerabilityCreate:
+      type: object
+      required: [severity]
+      properties:
+        asset_id: {type: string, format: uuid}
+        cve_id: {type: string, example: CVE-2024-1234}
+        severity: {type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL], example: CRITICAL}
+        status: {type: string, default: open, enum: [open, in_progress, remediated, false_positive]}
+        description: {type: string}
+    VulnerabilityOut:
+      allOf:
+        - $ref: "#/components/schemas/VulnerabilityCreate"
+        - type: object
+          properties:
+            id: {type: string, format: uuid}
+            tenant_id: {type: string, format: uuid}
+            detected_at: {type: string, format: date-time}
+            remediated_at: {type: string, format: date-time}
+    AlertCreate:
+      type: object
+      required: [severity, title]
+      properties:
+        asset_id: {type: string, format: uuid}
+        vulnerability_id: {type: string, format: uuid}
+        severity: {type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL], example: HIGH}
+        title: {type: string, example: RCE detected on web-prod-01}
+        description: {type: string}
+    AlertUpdate:
+      type: object
+      properties:
+        severity: {type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL]}
+        status: {type: string, enum: [new, acknowledged, resolved, dismissed]}
+        title: {type: string}
+        description: {type: string}
+    AlertOut:
+      allOf:
+        - $ref: "#/components/schemas/AlertCreate"
+        - type: object
+          properties:
+            id: {type: string, format: uuid}
+            tenant_id: {type: string, format: uuid}
+            status: {type: string}
+            created_at: {type: string, format: date-time}
+            resolved_at: {type: string, format: date-time}
+    IncidentCreate:
+      type: object
+      required: [title, severity, service, environment]
+      properties:
+        title: {type: string, example: Production outage}
+        severity: {type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL], example: CRITICAL}
+        service: {type: string, example: web-api}
+        environment: {type: string, example: production}
+    IncidentUpdate:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [open, investigating, resolved]}
+    IncidentOut:
+      allOf:
+        - $ref: "#/components/schemas/IncidentCreate"
+        - type: object
+          properties:
+            id: {type: string, format: uuid}
+            tenant_id: {type: string, format: uuid}
+            status: {type: string}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+            resolved_at: {type: string, format: date-time}
+    ScanResultCreate:
+      type: object
+      required: [scan_type]
+      properties:
+        asset_id: {type: string, format: uuid}
+        scan_type: {type: string, example: full}
+        findings_count: {type: integer, default: 0, example: 5}
+    ScanResultOut:
+      allOf:
+        - $ref: "#/components/schemas/ScanResultCreate"
+        - type: object
+          properties:
+            id: {type: string, format: uuid}
+            tenant_id: {type: string, format: uuid}
+            status: {type: string}
+            started_at: {type: string, format: date-time}
+            completed_at: {type: string, format: date-time}
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string, example: not_found}
+        message: {type: string, example: resource not found}
+    PaginationMeta:
+      type: object
+      properties:
+        limit: {type: integer}
+        offset: {type: integer}
+        total: {type: integer}

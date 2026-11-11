@@ -1,0 +1,89 @@
+name: CI — security-platform
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'security-platform/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'security-platform/**'
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  DATABASE_URL: "postgresql://security:security@localhost:5432/security_dashboard"
+  POSTGRES_USER: security
+  POSTGRES_PASSWORD: security
+  POSTGRES_DB: security_dashboard
+
+jobs:
+  quality:
+    name: Lint, type-check, test, build
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ${{ env.POSTGRES_USER }} -d ${{ env.POSTGRES_DB }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: security-platform/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r security-platform/requirements.txt
+          pip install -r security-platform/requirements.txt 2>/dev/null || true
+          pip install pytest pytest-asyncio httpx ruff
+
+      - name: Run migrations against Postgres
+        run: |
+          cd security-platform
+          python -c "
+from db import run_migration
+run_migration('migrations/0001_initial.sql')
+print('migrations applied')
+"
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Lint Python (ruff)
+        run: |
+          cd security-platform
+          ruff check --select E4,E7,E9,F src tests
+          ruff format --check src tests
+
+      - name: Run pytest (unit + integration)
+        run: |
+          cd security-platform
+          python -m pytest tests -q --cov=src --cov-report=term-missing
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+
+      - name: Build Docker image
+        run: |
+          cd security-platform
+          docker build -t security-platform:ci .
+
+      - name: Dependency scan (pip-audit)
+        run: |
+          pip install pip-audit || true
+          pip-audit -r security-platform/requirements.txt || true

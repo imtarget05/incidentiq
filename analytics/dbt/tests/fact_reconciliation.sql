@@ -1,0 +1,1 @@
+select 1 as mismatch where (select count(*) from {{ ref('stg_events') }}) <> ((select count(*) from {{ ref('fact_incident') }}) + (select count(*) from {{ ref('fact_triage') }}) + (select count(*) from {{ ref('fact_etl') }}))

@@ -1,0 +1,38 @@
+version: 2
+models:
+  - name: stg_events
+    columns:
+      - name: event_key
+        tests: [unique, not_null]
+      - name: tenant_id
+        tests:
+          - not_null
+          - relationships: {to: "ref('dim_tenant')", field: tenant_id}
+      - name: event_type
+        tests:
+          - accepted_values:
+              values: ["incident", "triage", "etl"]
+      - name: occurred_at
+        tests: [not_null]
+      - name: updated_at
+        tests: [not_null]
+  - name: dim_tenant
+    columns:
+      - name: tenant_id
+        tests: [unique, not_null]
+  - name: daily_metrics
+    columns:
+      - name: executions
+        tests: [not_null]
+  - name: fact_incident
+    columns:
+      - name: event_key
+        tests: [unique, not_null]
+  - name: fact_triage
+    columns:
+      - name: event_key
+        tests: [unique, not_null]
+  - name: fact_etl
+    columns:
+      - name: event_key
+        tests: [unique, not_null]

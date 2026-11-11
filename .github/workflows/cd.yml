@@ -1,0 +1,167 @@
+# ============================================
+# CD Pipeline - IncidentIQ
+# Triggers: push to main (image build), version tags (production release)
+# Builds & pushes vetted Container App images for the Azure backend
+# (api + etl-worker) consumed by the Azure deployment, then verifies
+# readiness of both the Cloudflare edge and the Azure backend.
+# ============================================
+
+name: CD Pipeline - IncidentIQ
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+env:
+  REGISTRY: ghcr.io
+  API_IMAGE: incidentiq-api
+  ETL_IMAGE: incidentiq-etl-worker
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  # ============================================================
+  # STAGE 1: Build & Push Vetted Images
+  # ============================================================
+  build-and-push:
+    name: "1. Build & Push Vetted Images"
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.tag.outputs.value }}
+      api-image: ${{ steps.image-names.outputs.api }}
+      etl-image: ${{ steps.image-names.outputs.etl }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate lowercase image names
+        id: image-names
+        run: |
+          API_IMAGE="${{ github.repository }}/${{ env.API_IMAGE }}"
+          ETL_IMAGE="${{ github.repository }}/${{ env.ETL_IMAGE }}"
+          echo "api=$(echo $API_IMAGE | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+          echo "etl=$(echo $ETL_IMAGE | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Determine image tag
+        id: tag
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "value=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.image-names.outputs.api-image }}:${{ steps.tag.outputs.value }}
+            ${{ env.REGISTRY }}/${{ steps.image-names.outputs.api-image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push ETL worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: api/Dockerfile.etl
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.image-names.outputs.etl-image }}:${{ steps.tag.outputs.value }}
+            ${{ env.REGISTRY }}/${{ steps.image-names.outputs.etl-image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================================
+  # STAGE 2: Post-build readiness verification
+  # ============================================================
+  # Verifies both the Cloudflare edge (public API + MCP) and the
+  # Azure backend (Container App health) are healthy after image build.
+  # ============================================================
+  verify-readiness:
+    name: "2. Verify backend readiness (Cloudflare + Azure)"
+    if: github.ref == 'refs/heads/main'
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    env:
+      PROD_API_WORKER_URL: ${{ vars.PROD_API_WORKER_URL }}
+      PROD_MCP_WORKER_URL: ${{ vars.PROD_MCP_WORKER_URL }}
+      AZURE_BACKEND_URL: ${{ vars.AZURE_BACKEND_URL }}
+      AZURE_EDGE_SECRET: ${{ secrets.AZURE_EDGE_SECRET }}
+      PROD_SMOKE_API_KEY: ${{ secrets.PROD_SMOKE_API_KEY }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify Cloudflare edge /health/live
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "${PROD_API_WORKER_URL}/health/live" || echo "000")
+          echo "CF /health/live -> $code"
+          [ "$code" = "200" ] || { echo "::error::Cloudflare /health/live unhealthy (HTTP $code)"; exit 1; }
+
+      - name: Verify Cloudflare edge /health/ready
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "${PROD_API_WORKER_URL}/health/ready" || echo "000")
+          echo "CF /health/ready -> $code"
+          [ "$code" = "200" ] || { echo "::error::Cloudflare /health/ready unhealthy (HTTP $code)"; exit 1; }
+
+      - name: Verify Cloudflare MCP tools/list
+        run: |
+          response="$(curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer ${PROD_SMOKE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+            "${PROD_MCP_WORKER_URL}/mcp")"
+          python3 -c 'import json,sys; names={x["name"] for x in json.loads(sys.argv[1])["result"]["tools"]}; assert {"search_runbooks","get_incident","get_triage_report"} <= names, f"Missing tools: {names}"' "$response"
+
+      - name: Verify Azure backend /health/live
+        if: env.AZURE_BACKEND_URL != '' && env.AZURE_EDGE_SECRET != ''
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            -H "X-Edge-Secret: ${AZURE_EDGE_SECRET}" \
+            "${AZURE_BACKEND_URL}/health/live" || echo "000")
+          echo "Azure /health/live -> $code"
+          [ "$code" = "200" ] || { echo "::error::Azure /health/live unhealthy (HTTP $code)"; exit 1; }
+
+      - name: Verify Azure backend /health/ready
+        if: env.AZURE_BACKEND_URL != '' && env.AZURE_EDGE_SECRET != ''
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            -H "X-Edge-Secret: ${AZURE_EDGE_SECRET}" \
+            "${AZURE_BACKEND_URL}/health/ready" || echo "000")
+          echo "Azure /health/ready -> $code"
+          [ "$code" = "200" ] || { echo "::error::Azure /health/ready unhealthy (HTTP $code)"; exit 1; }
+
+  # ============================================================
+  # STAGE 3: Versioned Release (tags only)
+  # ============================================================
+  release:
+    name: "3. Create GitHub Release"
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true

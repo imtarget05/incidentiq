@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "project": "incidentiq",
+  "tier": "local",
+  "started_at": "2026-11-10T05:53:45.217210+00:00",
+  "finished_at": "2026-11-10T05:53:48.591930+00:00",
+  "revision_before": "03e7e279515e902f7c6b84c0031aa90e5649bd70",
+  "revision_after": "03e7e279515e902f7c6b84c0031aa90e5649bd70",
+  "tracked_diff_sha256_before": "c36e984490809dd3bf7af8fcd0a575837de0a8045c51e5c47470bf5926937b07",
+  "working_tree_before": [
+    "M .gitignore",
+    " M pyproject.toml",
+    " M uv.lock",
+    "?? .nvmrc",
+    "?? .python-version",
+    "?? scripts/jd.py",
+    "?? tests/api/test_atomic_ingestion.py"
+  ],
+  "working_tree_after": [
+    "M .gitignore",
+    " M api/src/etl.py",
+    " M api/src/main.py",
+    " M pyproject.toml",
+    " M tests/api/test_etl_modes.py",
+    " M tests/api/test_ingestion.py",
+    " M uv.lock",
+    " M wrangler.toml",
+    "?? .nvmrc",
+    "?? .python-version",
+    "?? migrations/004_atomic_idempotency.sql",
+    "?? scripts/jd.py",
+    "?? tests/api/test_atomic_ingestion.py"
+  ],
+  "concurrent_changes_detected": true,
+  "results": [
+    {
+      "suite": "api",
+      "command": [
+        "/Users/mainguyenbinhtan/Downloads/Phu\u031bo\u031bng Trang/incidentiq/.venv/bin/python",
+        "-I",
+        "-m",
+        "pytest",
+        "tests/api",
+        "-q"
+      ],
+      "exit_code": 1,
+      "error": null
+    }
+  ],
+  "limitations": [
+    "Local checks only; not hosted CI, cloud, uptime, cost or RAG quality evidence.",
+    "Untracked file names are recorded but their contents are not included in the tracked diff hash.",
+    "Review and redact artifacts before publication; never collect environment variables or credentials."
+  ]
+}

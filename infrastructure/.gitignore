@@ -1,0 +1,19 @@
+# Terraform state — never commit.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+
+# Never commit secrets; the environments/*.tfvars files below contain only
+# names/labels and ARE tracked via the negations.
+*.tfvars
+!environments/*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc

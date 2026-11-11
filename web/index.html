@@ -9,14 +9,22 @@
 <body>
 <header class="bar">
   <div class="brand">AI Knowledge Platform</div>
-  <div class="auth">
-    <label>Tenant API Key</label>
-    <input type="password" id="apiKeyInput" placeholder="sk-…">
-    <button id="btnSaveKey">Lưu</button>
-    <span id="apiKeyStatus" class="hint">Chưa có API key</span>
-    <div id="apiKeyMsg" class="msg"></div>
-  </div>
   <div class="status" id="status">─</div>
+  <a class="bar-link" href="health.html">Trạng thái hệ thống</a>
+  <div class="auth">
+    <label for="apiKeyInput">Tenant API Key</label>
+    <div class="key-row">
+      <input type="password" id="apiKeyInput" placeholder="sk-…" autocomplete="off" spellcheck="false">
+      <button type="button" id="btnShowKey" class="btn-ghost" title="Hiện/ẩn API key" aria-label="Hiện/ẩn API key">👁</button>
+    </div>
+    <label class="remember"><input type="checkbox" id="rememberKey"> Ghi nhớ trên máy này (localStorage)</label>
+    <div class="key-actions">
+      <button type="button" id="btnSaveKey">Lưu</button>
+      <button type="button" id="btnClearKey" class="btn-danger">Xoá key</button>
+    </div>
+    <span id="apiKeyStatus" class="hint">⚠ Chưa có API key — các yêu cầu sẽ bị từ chối (401)</span>
+    <div id="apiKeyMsg" class="msg" aria-live="polite"></div>
+  </div>
 </header>
 
 <main class="wrap">
@@ -24,19 +32,19 @@
     <h2>Tải tài liệu lên</h2>
     <div class="form-row">
       <input type="file" id="fileInput" accept=".txt,.md">
-      <button id="btnUpload">Tải lên</button>
+      <button type="button" id="btnUpload">Tải lên</button>
     </div>
-    <div id="uploadMsg" class="msg"></div>
+    <div id="uploadMsg" class="msg" aria-live="polite"></div>
   </section>
 
   <section class="panel">
     <h2>Đặt câu hỏi</h2>
     <div class="form-row">
       <input type="text" id="questionInput" placeholder="Nhập câu hỏi...">
-      <button id="btnAsk">Gởi</button>
+      <button type="button" id="btnAsk">Gởi</button>
     </div>
-    <div id="answer" class="answer"></div>
-    <div id="citations" class="citations"></div>
+    <div id="answer" class="answer" aria-live="polite"></div>
+    <div id="citations" class="citations" aria-live="polite"></div>
   </section>
 
   <section class="panel">
@@ -51,25 +59,25 @@
     </div>
     <div class="form-row">
       <input type="text" id="incIdem" placeholder="Idempotency-Key (vd: inc-001)">
-      <button id="btnCreateInc">Tạo sự cố</button>
+      <button type="button" id="btnCreateInc">Tạo sự cố</button>
     </div>
-    <div id="incMsg" class="msg"></div>
-    <div id="incResult" class="msg"></div>
+    <div id="incMsg" class="msg" aria-live="polite"></div>
+    <div id="incResult" class="msg" aria-live="polite"></div>
   </section>
 
   <section class="panel">
     <h2>Chi tiết &amp; timeline sự cố</h2>
     <div class="form-row">
       <input type="text" id="incLookupId" placeholder="ID sự cố">
-      <button id="btnLookupInc">Xem</button>
+      <button type="button" id="btnLookupInc">Xem</button>
     </div>
-    <div id="incDetail"></div>
+    <div id="incDetail" aria-live="polite"></div>
     <ul id="incTimeline"></ul>
   </section>
 
   <section class="panel">
     <h2>Tài liệu của bạn</h2>
-    <button id="btnList">Làm mới danh sách</button>
+    <button type="button" id="btnList">Làm mới danh sách</button>
     <ul id="docList"></ul>
   </section>
 </main>

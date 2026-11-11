@@ -1,0 +1,10 @@
+name: incidentiq_analytics
+version: 1.0.0
+config-version: 2
+profile: jd_analytics
+model-paths: [models]
+test-paths: [tests]
+macro-paths: [macros]
+models:
+  incidentiq_analytics:
+    +materialized: table

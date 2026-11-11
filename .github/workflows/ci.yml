@@ -81,6 +81,7 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=incidentiq
+            -Dsonar.organization=imtarget05
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
             -Dsonar.python.coverage.reportPaths=coverage.xml
@@ -102,3 +103,36 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           format: table
+
+  deps-audit:
+    name: Dependency vulnerability scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Audit Python dependencies with pip-audit
+        run: |
+          python -m pip install pip-audit
+          pip-audit -r api/requirements.txt
+
+      - name: Audit npm dependencies with npm audit
+        working-directory: mcp
+        run: |
+          npm ci
+          echo "Gate: production dependencies (high+ severity fails the build)"
+          npm audit --omit=dev --audit-level=high
+          echo "Report: all dependencies including dev (informational, non-gating)"
+          npm audit --audit-level=high \
+            || echo "::warning::npm audit reported high/critical vulnerabilities in dev-only dependencies"

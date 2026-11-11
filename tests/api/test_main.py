@@ -236,4 +236,5 @@ def test_ask_question(monkeypatch):
     assert r2.status_code == 202  # idempotent duplicate
 
     r3 = client.post("/api/v1/question", json={"question": ""}, headers=h)
-    assert r3.status_code == 400
+    assert r3.status_code == 422
+    assert r3.json()["error"]["code"] == "validation_error"

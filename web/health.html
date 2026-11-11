@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trạng thái hệ thống — AI Knowledge Platform</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Trạng thái hệ thống</div>
+  <a class="bar-link" href="index.html">← Về trang chính</a>
+</header>
+
+<main class="wrap">
+  <section class="panel">
+    <div class="health-toolbar">
+      <button type="button" id="btnRefresh">Làm mới ngay</button>
+      <span id="lastCheck" class="hint">Chưa kiểm tra</span>
+    </div>
+    <div id="cards" class="cards"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Nhật ký thay đổi trạng thái (20 gần nhất)</h2>
+    <ul id="eventLog"><li>(chưa có thay đổi nào)</li></ul>
+  </section>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const POLL_MS = 15000;
+  const ENDPOINTS = [
+    { key: "health", path: "/health",       label: "/health",       desc: "Tổng quát" },
+    { key: "ready",  path: "/health/ready", label: "/health/ready", desc: "Sẵn sàng phục vụ" },
+    { key: "live",   path: "/health/live",  label: "/health/live",  desc: "Tiến trình còn sống" },
+  ];
+  const CHECK_LABELS = { db: "db", vectorize: "vectorize", etl_queue: "etl_queue", etl_dlq: "etl_dlq", ai: "ai" };
+  const LEVEL_LABEL = { ok: "OK", degraded: "Suy giảm", down: "Lỗi", na: "n/a" };
+  const LOG_CLASS = { ok: "log-ok", degraded: "log-warn", down: "log-err", na: "log-na" };
+
+  const states = {};     // key -> { level, status, latency, at, checks }
+  const prevLevel = {};  // key -> mức trước đó (để phát hiện thay đổi)
+  const log = [];        // tối đa 20 thay đổi gần nhất
+  let inFlight = false;
+
+  // ── Xếp loại trạng thái từ kết quả fetch ──────────────────────────────────
+  // 200 + status "ok" → ok (xanh); 503 / status "degraded" → suy giảm (vàng);
+  // lỗi khác → down (đỏ); 404 (triển khai cũ) → n/a (xám), fallback về /health.
+  function levelFor(res) {
+    if (res.notFound) return "na";
+    if (res.networkError) return "down";
+    if (res.status === 503) return "degraded";
+    if (res.ok) {
+      const s = res.data && res.data.status;
+      if (s === "degraded") return "degraded";
+      return "ok";
+    }
+    return "down";
+  }
+
+  async function checkOne(ep) {
+    const t0 = performance.now();
+    let res;
+    try {
+      const r = await fetch(ep.path, { cache: "no-store" });
+      let data = null;
+      try { data = await r.json(); } catch (e) { /* body không phải JSON */ }
+      res = { ok: r.ok, status: r.status, data: data, notFound: r.status === 404, networkError: null };
+    } catch (e) {
+      res = { ok: false, status: 0, data: null, notFound: false, networkError: e };
+    }
+    const latency = Math.round(performance.now() - t0);
+    const level = levelFor(res);
+
+    let statusText;
+    if (res.notFound) statusText = "endpoint không có ở triển khai này";
+    else if (res.networkError) statusText = "không liên lạc được";
+    else if (res.data && res.data.status) statusText = res.data.status;
+    else statusText = "HTTP " + res.status;
+
+    const before = prevLevel[ep.key];
+    prevLevel[ep.key] = level;
+    if (before !== undefined && before !== level) addLog(ep, before, level);
+
+    states[ep.key] = {
+      level: level,
+      status: statusText,
+      latency: latency,
+      at: new Date(),
+      checks: (ep.key === "ready" && res.data && res.data.checks) ? res.data.checks : null,
+    };
+  }
+
+  function addLog(ep, from, to) {
+    log.unshift({
+      at: new Date(),
+      label: ep.label,
+      from: LEVEL_LABEL[from] || from,
+      to: LEVEL_LABEL[to] || to,
+      level: to,
+    });
+    if (log.length > 20) log.length = 20;
+    renderLog();
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  function renderCards() {
+    const box = $("cards");
+    if (!box) return;
+    box.textContent = "";
+    ENDPOINTS.forEach((ep) => {
+      const st = states[ep.key];
+      if (!st) return;
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const head = document.createElement("div");
+      head.className = "card-head";
+      const epEl = document.createElement("span");
+      epEl.className = "ep";
+      epEl.textContent = ep.label;
+      const badge = document.createElement("span");
+      badge.className = "badge " + st.level;
+      badge.textContent = LEVEL_LABEL[st.level];
+      head.appendChild(epEl);
+      head.appendChild(badge);
+      card.appendChild(head);
+
+      const desc = document.createElement("div");
+      desc.className = "desc";
+      desc.textContent = ep.desc;
+      card.appendChild(desc);
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = "trạng thái: " + st.status
+        + " · " + st.latency + " ms"
+        + " · kiểm tra: " + st.at.toLocaleTimeString("vi-VN");
+      card.appendChild(meta);
+
+      if (st.checks && typeof st.checks === "object") {
+        const wrap = document.createElement("div");
+        wrap.className = "checks";
+        Object.keys(CHECK_LABELS).forEach((k) => {
+          if (!(k in st.checks)) return;
+          const v = st.checks[k];
+          const val = (typeof v === "string") ? v : ((v && (v.status || v.state)) || "?");
+          const chip = document.createElement("span");
+          chip.className = "chk " + (val === "ok" ? "ok" : "bad");
+          chip.textContent = CHECK_LABELS[k] + ": " + val;
+          wrap.appendChild(chip);
+        });
+        if (wrap.childNodes.length) card.appendChild(wrap);
+      }
+      box.appendChild(card);
+    });
+  }
+
+  function renderLog() {
+    const ul = $("eventLog");
+    if (!ul) return;
+    ul.textContent = "";
+    if (!log.length) {
+      const li = document.createElement("li");
+      li.textContent = "(chưa có thay đổi nào)";
+      ul.appendChild(li);
+      return;
+    }
+    log.forEach((e) => {
+      const li = document.createElement("li");
+      li.className = LOG_CLASS[e.level] || "log-na";
+      li.textContent = "[" + e.at.toLocaleTimeString("vi-VN") + "] " + e.label + ": " + e.from + " → " + e.to;
+      ul.appendChild(li);
+    });
+  }
+
+  function render() {
+    renderCards();
+    renderLog();
+  }
+
+  // ── Vòng lặp kiểm tra (15s + nút làm mới) ─────────────────────────────────
+  async function poll() {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      await Promise.all(ENDPOINTS.map(checkOne));
+    } finally {
+      inFlight = false;
+    }
+    render();
+    const last = $("lastCheck");
+    if (last) last.textContent = "Kiểm tra lần cuối: " + new Date().toLocaleTimeString("vi-VN");
+  }
+
+  $("btnRefresh") && $("btnRefresh").addEventListener("click", poll);
+  poll();
+  setInterval(poll, POLL_MS);
+})();
+</script>
+</body>
+</html>

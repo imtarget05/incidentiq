@@ -7,7 +7,7 @@ IncidentIQ is a backend engineering project for retrieving operational knowledge
 - **Problem:** incident responders need relevant runbook and document context alongside incident details.
 - **Architecture:** FastAPI-compatible Python Worker API, D1 metadata and full-text search, Workers AI embeddings, optional Vectorize, ETL consumer, and a TypeScript MCP-style endpoint.
 - **Retrieval:** lexical search and vector search are combined where configured; the code also includes fallback paths.
-- **Current evidence:** API tests pass 60/60 under Python 3.13; MCP has 15 passing tests and typecheck. CI defines lint/test, Trivy, and SonarQube gates, but no hosted run is attached. MCP `npm audit` reports 12 advisories (2 critical, 8 high, 2 moderate), so dependency security is not clean.
+- **Current evidence:** API tests pass 60/60 under Python 3.13; MCP has 15 passing tests and typecheck. MCP `npm audit` reports zero vulnerabilities, and the local Trivy high/critical dependency scan reports zero findings. CI defines lint/test, Trivy, and SonarQube gates, but no hosted run is attached.
 - **Readiness:** production readiness is not established. Evaluation fixtures use fake backends; they do not establish live retrieval quality, latency, or cost.
 
 ## Architecture and request flow
@@ -56,7 +56,7 @@ The TypeScript endpoint exposes tools that call the API. MCP bearer credentials 
 
 The evaluation material reports a small golden set against fake backends. Treat it as a deterministic harness check, not as measured RAG accuracy, production latency, or a security result. The live smoke harness exercises API behavior but does not establish document-grounded answer quality against a representative corpus.
 
-The GitHub Actions workflow runs Python tests with coverage, MCP type-checking/tests, deterministic evaluation/demo, and Wrangler dry runs. Ruff runs a strict selected error set without a fallback that could hide failures. Trivy scans the filesystem for high/critical dependency, secret, and configuration findings. MCP `npm audit` currently reports 12 advisories (2 critical, 8 high, 2 moderate); supported coordinated major upgrades are needed, so dependency security is not clean. SonarQube Server analysis waits for the quality gate and fails when `SONAR_HOST_URL` or `SONAR_TOKEN` is absent. The Sonar project must exist on the configured server. A separate manual preview workflow uses distinct D1, Vectorize and queue resources; it refuses IDs/names that match the production configuration. No hosted CI or preview run is attached.
+The GitHub Actions workflow runs Python tests with coverage, MCP type-checking/tests, deterministic evaluation/demo, and Wrangler dry runs. Ruff runs a strict selected error set without a fallback that could hide failures. The current MCP `npm audit` reports zero vulnerabilities; the local Trivy high/critical dependency scan also reports zero findings. Trivy did not discover supported configuration files in this repository scan, so this is not evidence that deployed Cloudflare settings are secure. SonarQube Server analysis waits for the quality gate and fails when `SONAR_HOST_URL` or `SONAR_TOKEN` is absent. The Sonar project must exist on the configured server. A separate manual preview workflow uses distinct D1, Vectorize and queue resources; it refuses IDs/names that match the production configuration. No hosted CI or preview run is attached.
 
 ## Production readiness
 

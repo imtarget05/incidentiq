@@ -215,6 +215,13 @@ def _setup_db(env):
     db.workspaces["w1"] = {"id": "w1", "name": "Workspace One", "is_active": 1, "created_at": 1000}
     db.workspace_members.append({"id": "wm1", "workspace_id": "w1", "tenant_id": "t1",
                                  "role": "investigator", "created_at": 1001})
+    # Second tenant for the tenant-isolation golden case.
+    db.tenants["t2"] = {"id": "t2", "name": "Tenant Two", "is_active": 1}
+    db.api_keys.append({"id": "ak2", "tenant_id": "t2", "key_prefix": "sk-test2",
+                        "key_hash": main._sha256_hex("sk-test22222222"), "is_active": 1})
+    db.workspaces["w2"] = {"id": "w2", "name": "Workspace Two", "is_active": 1, "created_at": 1000}
+    db.workspace_members.append({"id": "wm2", "workspace_id": "w2", "tenant_id": "t2",
+                                 "role": "investigator", "created_at": 1001})
 
 
 # --------------------------------------------------------------------------- golden cases
@@ -346,26 +353,126 @@ def golden_cases() -> List[Dict[str, Any]]:
             "expected_status": "insufficient_evidence",
             "expected_hypothesis_contains": None,
         })
+
+    # --- Representative behavior cases (Phase 6 RAG evaluation set) ---
+
+    # (f) Multi-service ambiguity: same symptom text across two services —
+    # retrieval must surface BOTH candidate runbooks, not silently pick one.
+    cases.append({
+        "id": "gc-31",
+        "multi_service": True,
+        "incident": {"title": "High latency spike", "severity": "HIGH",
+                     "service": "checkout-api", "environment": "prod"},
+        "docs": [
+            {"id": "doc-gc-31a", "content": "High latency spike checkout-api: p99 up. "
+             "Check upstream payment service dependencies.", "tenant_id": "t1",
+             "filename": "gc-31a.md", "status": "processed", "idempotency_key": "dk-gc-31a",
+             "uploaded_at": now + 900, "version": 1},
+            {"id": "doc-gc-31b", "content": "High latency spike payment-api: p99 up. "
+             "Check database connection pool saturation.", "tenant_id": "t1",
+             "filename": "gc-31b.md", "status": "processed", "idempotency_key": "dk-gc-31b",
+             "uploaded_at": now + 901, "version": 1},
+        ],
+        "matches": [
+            {"id": "vec-gc-31a", "score": 0.90,
+             "metadata": {"document_id": "doc-gc-31a", "tenant_id": "t1",
+                          "chunk_id": "doc-gc-31a-v1-0",
+                          "content": "High latency spike checkout-api: p99 up. "
+                          "Check upstream payment service dependencies.", "version": 1}},
+            {"id": "vec-gc-31b", "score": 0.85,
+             "metadata": {"document_id": "doc-gc-31b", "tenant_id": "t1",
+                          "chunk_id": "doc-gc-31b-v1-0",
+                          "content": "High latency spike payment-api: p99 up. "
+                          "Check database connection pool saturation.", "version": 1}},
+        ],
+        "expected_status": "ok",
+        "expected_hypothesis_contains": "High latency spike",
+        "expected_min_citations": 2,
+    })
+
+    # (g) ABSTENTION: question with no matching docs — expect an empty-context
+    # (no-citation) answer instead of a hallucinated one.
+    cases.append({
+        "id": "gc-32",
+        "kind": "question",
+        "question": "What causes the purple unicorn kernel panic in the frobnicator fleet?",
+        "docs": [],
+        "matches": [],
+        "expected_status": "abstained",
+        "expected_hypothesis_contains": None,
+    })
+
+    # (h) Citation accuracy: the top citation MUST reference the expected runbook.
+    cases.append({
+        "id": "gc-33",
+        "citation_accuracy": True,
+        "incident": {"title": "Database connection timeout", "severity": "CRITICAL",
+                     "service": "billing-db", "environment": "prod"},
+        "docs": [{"id": "doc-gc-33", "content": "Database connection timeout billing-db: "
+                  "check connection pool exhaustion and network policies.",
+                  "tenant_id": "t1", "filename": "gc-33.md", "status": "processed",
+                  "idempotency_key": "dk-gc-33", "uploaded_at": now + 902, "version": 1}],
+        "matches": [{"id": "vec-gc-33", "score": 0.95,
+                     "metadata": {"document_id": "doc-gc-33", "tenant_id": "t1",
+                                  "chunk_id": "doc-gc-33-v1-0",
+                                  "content": "Database connection timeout billing-db: "
+                                  "check connection pool exhaustion and network policies.",
+                                  "version": 1}}],
+        "expected_status": "ok",
+        "expected_hypothesis_contains": "Database connection timeout",
+        "expected_citation_document_id": "doc-gc-33",
+    })
+
+    # (i) Tenant isolation: tenant B triages its own incident while the only
+    # matching docs/matches belong to tenant A — nothing from A may leak.
+    cases.append({
+        "id": "gc-34",
+        "apikey": "sk-test22222222",
+        "expect_isolation": True,
+        "forbidden_document_ids": ["doc-gc-34"],
+        "incident": {"title": "Tenant A secret OOM", "severity": "HIGH",
+                     "service": "payment-api", "environment": "prod"},
+        "docs": [{"id": "doc-gc-34", "content": "Tenant A secret runbook OOMKilled "
+                  "payment-api memory limit exceeded.", "tenant_id": "t1",
+                  "filename": "gc-34.md", "status": "processed",
+                  "idempotency_key": "dk-gc-34", "uploaded_at": now + 903, "version": 1}],
+        "matches": [{"id": "vec-gc-34", "score": 0.99,
+                     "metadata": {"document_id": "doc-gc-34", "tenant_id": "t1",
+                                  "chunk_id": "doc-gc-34-v1-0",
+                                  "content": "Tenant A secret runbook OOMKilled "
+                                  "payment-api memory limit exceeded.", "version": 1}}],
+        "expected_status": "insufficient_evidence",
+        "expected_hypothesis_contains": None,
+    })
     return cases
 
 
 def run_case(client, env, case: Dict[str, Any]) -> Dict[str, Any]:
     cid = case["id"]
-    inc = case["incident"]
-    # Create incident.
-    r = client.post("/api/v1/incidents", json=inc, headers=_headers(env, idem=f"eval-{cid}"))
-    assert r.status_code == 201, (cid, r.status_code, r.text)
-    inc_id = r.json()["incident_id"]
-    # Seed docs + vector matches.
+    apikey = case.get("apikey", "sk-test12345678")
+    # Seed docs + vector matches (tenant-isolated by the fake backends).
     for doc in case["docs"]:
         env.DB.documents[doc["id"]] = doc
     env.VECTORIZE_INDEX.matches = case["matches"]
     # Configure the fake LLM to return the expected hypothesis (for scoring).
     hyp = case["expected_hypothesis_contains"] or "unknown"
     env.ai.responses = {"": '{"summary":"eval","hypotheses":[{"text":"' + hyp.replace('"', '\\"') + '","confirmed":false}]}'}
-    # Triage.
+
+    if case.get("kind", "triage") == "question":
+        # Question case: ask RAG question, measure citations/abstention.
+        r = client.post("/api/v1/question",
+                        json={"question": case["question"]},
+                        headers=_headers(env, idem=f"eval-{cid}-q", apikey=apikey))
+        assert r.status_code == 200, (cid, r.status_code, r.text)
+        return r.json()
+
+    # Triage case: create incident, then triage it.
+    r = client.post("/api/v1/incidents", json=case["incident"],
+                    headers=_headers(env, idem=f"eval-{cid}", apikey=apikey))
+    assert r.status_code == 201, (cid, r.status_code, r.text)
+    inc_id = r.json()["incident_id"]
     r2 = client.post(f"/api/v1/incidents/{inc_id}/triage",
-                     headers={**_headers(env, idem=f"eval-{cid}-2")})
+                     headers=_headers(env, idem=f"eval-{cid}-2", apikey=apikey))
     assert r2.status_code == 200, (cid, r2.status_code, r2.text)
     return r2.json()
 
@@ -376,22 +483,53 @@ def evaluate(cases, client, env) -> Dict[str, Any]:
     results: List[Dict[str, Any]] = []
     for case in cases:
         body = run_case(client, env, case)
+        kind = case.get("kind", "triage")
         expected_status = case["expected_status"]
-        status_ok = body["status"] == expected_status
         citations = body.get("citations", [])
-        evidence = body.get("evidence", [])
-        hypothesis = " ".join(h.get("text", "") for h in body.get("hypotheses", []))
-        hyp_match = (case["expected_hypothesis_contains"] is None
-                     or case["expected_hypothesis_contains"].lower() in hypothesis.lower())
+        if kind == "question":
+            # Abstention contract: an empty retrieval must yield an empty
+            # citation list (the answer must not fabricate references).
+            actual_status = "abstained" if not citations else "answered"
+            evidence = []
+            hypothesis = ""
+            hyp_match = True
+        else:
+            actual_status = body.get("status")
+            evidence = body.get("evidence", [])
+            hypothesis = " ".join(h.get("text", "") for h in body.get("hypotheses", []))
+            hyp_match = (case["expected_hypothesis_contains"] is None
+                         or case["expected_hypothesis_contains"].lower() in hypothesis.lower())
+        status_ok = actual_status == expected_status
         citation_valid = all(c.get("document_id") for c in citations)
+        # (h) Citation accuracy: top citation references the expected document.
+        citation_accuracy = True
+        if case.get("expected_citation_document_id") is not None:
+            top_doc = citations[0].get("document_id") if citations else None
+            citation_accuracy = top_doc == case["expected_citation_document_id"]
+        # (i) Tenant isolation: no forbidden (other-tenant) document ids leak.
+        isolation_ok = True
+        if case.get("expect_isolation"):
+            blob = json.dumps(body, default=str)
+            forbidden = case.get("forbidden_document_ids", [])
+            isolation_ok = (not citations) and all(fid not in blob for fid in forbidden)
+        # (f) Multi-service ambiguity: retrieval must surface every candidate.
+        min_citations_ok = True
+        if case.get("expected_min_citations") is not None:
+            min_citations_ok = len(citations) >= case["expected_min_citations"]
+        passed = (status_ok and hyp_match and citation_valid and citation_accuracy
+                  and isolation_ok and min_citations_ok)
         results.append({
             "id": case["id"],
+            "kind": kind,
             "expected_status": expected_status,
-            "actual_status": body["status"],
+            "actual_status": actual_status,
+            "passed": passed,
             "status_ok": status_ok,
             "citation_count": len(citations),
             "evidence_count": len(evidence),
             "citation_valid": citation_valid,
+            "citation_accuracy": citation_accuracy,
+            "isolation_ok": isolation_ok,
             "hypothesis_match": hyp_match,
             "hypothesis": hypothesis[:120],
         })
@@ -404,9 +542,14 @@ def evaluate(cases, client, env) -> Dict[str, Any]:
     mrr = sum(1 / (r["citation_count"] + 1) for r in sufficient) / max(1, len(sufficient))  # proxy
     correctness = sum(1 for r in results if r["status_ok"] and r["hypothesis_match"]) / max(1, n)
     citation_validity = sum(1 for r in results if r["citation_valid"]) / max(1, n)
+    citation_accuracy = sum(1 for r in results if r["citation_accuracy"]) / max(1, n)
     groundedness = sum(1 for r in sufficient if r["evidence_count"] > 0) / max(1, len(sufficient))
     abstention_rate = sum(1 for r in insufficient if r["actual_status"] == "insufficient_evidence") / max(1, len(insufficient))
     hallucination_rate = sum(1 for r in results if r["actual_status"] == "ok" and r["evidence_count"] == 0) / max(1, n)
+    isolation_rate = sum(1 for r in results if r["isolation_ok"]) / max(1, n)
+    question_abstention = [r for r in results if r["kind"] == "question"]
+    question_abstention_rate = (sum(1 for r in question_abstention if r["actual_status"] == "abstained")
+                                / max(1, len(question_abstention)))
 
     return {
         "total": n,
@@ -416,9 +559,12 @@ def evaluate(cases, client, env) -> Dict[str, Any]:
         "mrr_proxy": round(mrr, 3),
         "correctness": round(correctness, 3),
         "citation_validity": round(citation_validity, 3),
+        "citation_accuracy": round(citation_accuracy, 3),
         "groundedness": round(groundedness, 3),
         "abstention_rate": round(abstention_rate, 3),
         "hallucination_rate": round(hallucination_rate, 3),
+        "isolation_rate": round(isolation_rate, 3),
+        "question_abstention_rate": round(question_abstention_rate, 3),
         "results": results,
     }
 
@@ -429,6 +575,11 @@ def main_eval(live_url: str | None) -> None:
     cases = golden_cases()
     assert len(cases) >= 30, len(cases)
     assert sum(1 for c in cases if c["expected_status"] == "insufficient_evidence") >= 10
+    # Phase 6 coverage requirements: representative case types must exist.
+    assert sum(1 for c in cases if c.get("multi_service")) >= 1, "missing multi-service ambiguity case"
+    assert sum(1 for c in cases if c.get("kind") == "question") >= 1, "missing abstention case"
+    assert sum(1 for c in cases if c.get("expected_citation_document_id")) >= 1, "missing citation-accuracy case"
+    assert sum(1 for c in cases if c.get("expect_isolation")) >= 1, "missing tenant-isolation case"
 
     import json as _json
     from fastapi.testclient import TestClient
@@ -462,13 +613,24 @@ def main_eval(live_url: str | None) -> None:
         client = TestClient(main.app)
         metrics = evaluate(cases, client, env)
 
+    # Hard pass/fail: every golden case must pass on its measured assertions.
+    failed = [r["id"] for r in metrics["results"] if not r.get("passed", False)]
+    assert not failed, f"golden cases failed: {failed}"
+
     os.makedirs("docs", exist_ok=True)
+    table = ["| case | kind | expected | actual | citations | passed |",
+             "|------|------|----------|--------|-----------|--------|"]
+    for r in metrics["results"]:
+        table.append(f"| {r['id']} | {r.get('kind', 'triage')} | {r['expected_status']} "
+                     f"| {r['actual_status']} | {r['citation_count']} | {'pass' if r['passed'] else 'FAIL'} |")
     lines = [
         "# IncidentIQ — Evaluation Results",
         "",
         f"Total golden cases: {metrics['total']}",
-        f"Sufficient-evidence cases: {metrics.get('sufficient', 'n/a')}",
-        f"Insufficient-evidence cases: {metrics.get('insufficient', 'n/a')}",
+        f"Sufficient-evidence triage cases: {metrics.get('sufficient', 'n/a')}",
+        f"Insufficient-evidence triage cases: {metrics.get('insufficient', 'n/a')}",
+        "Special cases: multi-service ambiguity (gc-31), question abstention (gc-32), "
+        "citation accuracy (gc-33), tenant isolation (gc-34)",
         "",
         "## Retrieval metrics",
         f"- Recall@5: {metrics.get('recall_at_5', 'n/a')}",
@@ -477,13 +639,23 @@ def main_eval(live_url: str | None) -> None:
         "## Answer metrics",
         f"- Correctness (status + hypothesis): {metrics.get('correctness', 'n/a')}",
         f"- Citation validity: {metrics.get('citation_validity', 'n/a')}",
+        f"- Citation accuracy (top citation = expected doc): {metrics.get('citation_accuracy', 'n/a')}",
         f"- Groundedness: {metrics.get('groundedness', 'n/a')}",
         f"- Abstention rate (insufficient cases): {metrics.get('abstention_rate', 'n/a')}",
+        f"- Question abstention rate (no matching docs): {metrics.get('question_abstention_rate', 'n/a')}",
         f"- Hallucination rate (ok but no evidence): {metrics.get('hallucination_rate', 'n/a')}",
+        f"- Tenant isolation rate: {metrics.get('isolation_rate', 'n/a')}",
+        "",
+        "## Per-case results (measured)",
+        "",
+        *table,
         "",
         "## Method",
-        "Ran 30 golden cases (20 sufficient, 10 insufficient) against a faked Cloudflare backend.",
+        f"Ran {metrics['total']} golden cases ({metrics['sufficient']} sufficient, "
+        f"{metrics['insufficient']} insufficient, plus question-abstention, citation-accuracy, "
+        "tenant-isolation and multi-service-ambiguity cases) against a faked Cloudflare backend.",
         "No benchmark numbers were fabricated; all values are actual measured results.",
+        "The harness fails hard when any case does not pass its measured assertions.",
     ]
     with open("docs/evaluation.md", "w") as f:
         f.write("\n".join(lines) + "\n")

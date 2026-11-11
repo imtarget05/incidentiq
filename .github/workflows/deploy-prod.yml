@@ -1,0 +1,135 @@
+name: Deploy IncidentIQ production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type exactly "deploy-prod" to confirm production deployment'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incidentiq-cloudflare-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-prod:
+    name: Deploy production Cloudflare resources
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_D1_DATABASE_ID: ${{ vars.PROD_D1_DATABASE_ID }}
+      PROD_VECTORIZE_INDEX: ${{ vars.PROD_VECTORIZE_INDEX }}
+      PROD_ETL_QUEUE: ${{ vars.PROD_ETL_QUEUE }}
+      PROD_ETL_DLQ: ${{ vars.PROD_ETL_DLQ }}
+      PROD_API_WORKER_URL: ${{ vars.PROD_API_WORKER_URL }}
+      PROD_MCP_WORKER_URL: ${{ vars.PROD_MCP_WORKER_URL }}
+      PROD_SMOKE_API_KEY: ${{ secrets.PROD_SMOKE_API_KEY }}
+    steps:
+      - name: Require manual deployment confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "deploy-prod" ]; then
+            echo "Production deployment aborted: the 'confirm' input must be exactly 'deploy-prod'." >&2
+            echo "Re-run this workflow from the Actions tab and type 'deploy-prod' in the confirm field." >&2
+            exit 1
+          fi
+          echo "Manual deployment confirmation received."
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pinned Wrangler from MCP lockfile
+        run: npm ci
+        working-directory: mcp
+
+      - name: Validate production environment matches committed configuration
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import tomllib
+
+          required = (
+              "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "PROD_D1_DATABASE_ID",
+              "PROD_VECTORIZE_INDEX", "PROD_ETL_QUEUE", "PROD_ETL_DLQ",
+              "PROD_API_WORKER_URL", "PROD_MCP_WORKER_URL", "PROD_SMOKE_API_KEY",
+          )
+          missing = [key for key in required if not os.environ.get(key)]
+          if missing:
+              raise SystemExit("Missing production environment settings: " + ", ".join(missing))
+
+          api_config = tomllib.loads(pathlib.Path("wrangler.toml").read_text())
+          etl_config = tomllib.loads(pathlib.Path("wrangler.etl.toml").read_text())
+
+          api_d1 = api_config["d1_databases"][0]["database_id"]
+          etl_d1 = etl_config["d1_databases"][0]["database_id"]
+          if api_d1 != etl_d1:
+              raise SystemExit("wrangler.toml and wrangler.etl.toml disagree on the D1 database ID")
+          if os.environ["PROD_D1_DATABASE_ID"] != api_d1:
+              raise SystemExit(
+                  "PROD_D1_DATABASE_ID "
+                  f"({os.environ['PROD_D1_DATABASE_ID']}) does not match the D1 database ID "
+                  f"committed in wrangler.toml ({api_d1})"
+              )
+
+          committed_index = api_config["vectorize"][0]["index_name"]
+          if os.environ["PROD_VECTORIZE_INDEX"] != committed_index:
+              raise SystemExit(
+                  "PROD_VECTORIZE_INDEX "
+                  f"({os.environ['PROD_VECTORIZE_INDEX']}) does not match the Vectorize index name "
+                  f"committed in wrangler.toml ({committed_index})"
+              )
+
+          api_queues = {item["queue"] for item in api_config["queues"]["producers"]}
+          consumer = etl_config["queues"]["consumers"][0]
+          committed_queues = {consumer["queue"], consumer["dead_letter_queue"]}
+          if {os.environ["PROD_ETL_QUEUE"], os.environ["PROD_ETL_DLQ"]} != committed_queues:
+              raise SystemExit(
+                  "PROD_ETL_QUEUE/PROD_ETL_DLQ "
+                  f"({os.environ['PROD_ETL_QUEUE']}, {os.environ['PROD_ETL_DLQ']}) do not match the "
+                  f"queues committed in wrangler.toml / wrangler.etl.toml ({sorted(committed_queues)})"
+              )
+          if os.environ["PROD_ETL_QUEUE"] not in api_queues or os.environ["PROD_ETL_DLQ"] not in api_queues:
+              raise SystemExit("Production ETL queues must be bound as producers in wrangler.toml")
+          if os.environ["PROD_ETL_QUEUE"] == os.environ["PROD_ETL_DLQ"]:
+              raise SystemExit("Production ETL queue and DLQ must have different names")
+
+          for key in ("PROD_API_WORKER_URL", "PROD_MCP_WORKER_URL"):
+              if not re.fullmatch(r"https://[^/]+", os.environ[key]):
+                  raise SystemExit(f"{key} must be an HTTPS origin")
+          PY
+
+      - name: Apply migrations to production D1
+        run: |
+          export PATH="$PWD/mcp/node_modules/.bin:$PATH"
+          wrangler d1 migrations apply ai-knowledge-platform --remote --config wrangler.toml
+
+      - name: Deploy production Workers
+        run: |
+          export PATH="$PWD/mcp/node_modules/.bin:$PATH"
+          wrangler deploy --config wrangler.toml
+          wrangler deploy --config wrangler.etl.toml
+          wrangler deploy --config mcp/wrangler.toml
+
+      - name: Verify production API behavior
+        run: ./scripts/smoke_test.sh "$PROD_API_WORKER_URL" "$PROD_SMOKE_API_KEY"
+
+      - name: Verify MCP protocol endpoint
+        run: |
+          response="$(curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer $PROD_SMOKE_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+            "$PROD_MCP_WORKER_URL/mcp")"
+          python3 -c 'import json,sys; names={x["name"] for x in json.loads(sys.argv[1])["result"]["tools"]}; assert {"search_runbooks","get_incident","get_triage_report"} <= names' "$response"

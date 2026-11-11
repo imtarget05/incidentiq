@@ -1,0 +1,22 @@
+[project]
+name = "security-platform"
+version = "1.0.0"
+description = "Cybersecurity Dashboard backend — RESTful API on PostgreSQL"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.116.0",
+    "psycopg2-binary>=2.9.9,<2.10.0",
+    "pydantic>=2.7.4",
+    "python-dotenv>=1.0.1",
+    "google-auth>=2.29.0",
+    "google-auth-oauthlib>=1.1.0",
+    "python-jose[cryptography]>=3.3.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2.2",
+    "pytest-asyncio>=0.23.7",
+    "httpx>=0.27.0",
+    "ruff>=0.8.6",
+]

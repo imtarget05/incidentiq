@@ -36,6 +36,10 @@ enabled = true
 # inline = chunk/embed/upsert during the upload request (works without a consumer)
 # queue  = enqueue only; requires the ai-knowledge-etl consumer worker
 ETL_MODE = "inline"
+# Hybrid Option B: when USE_AZURE_BACKEND=1, the Workers API proxies data-plane
+# calls to the IncidentIQ backend on Azure Container Apps. Set via wrangler secret
+# / variable per environment.
+AZURE_BACKEND_URL = "REPLACE_WITH_AZURE_BACKEND_URL"
 
 [ai]
 binding = "ai"

@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import re
+import time
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 MAX_CHUNK_CHARS = 800
 MAX_CHUNKS_PER_DOCUMENT = 25
@@ -32,6 +36,91 @@ async def _db_all(stmt: Any) -> List[Any]:
 
 
 MAX_RETRIES = 3
+
+
+# --------------------------------------------------------------------------- retry circuit breaker
+#
+# D1-backed, per-tenant circuit breaker for the queue ETL path (table
+# `etl_circuit_state`, migrations/006_orchestration.sql). A tenant whose ETL
+# keeps failing floods the queue with retries; the breaker lets a single
+# half-open probe through after a cooldown instead. Every helper is wrapped in
+# try/except and fails OPEN: if the breaker table itself is broken, ETL must
+# never be blocked by its own safety mechanism.
+
+CB_THRESHOLD = 5           # consecutive failures before the circuit opens
+CB_COOLDOWN_MS = 60_000    # default half-open cooldown
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+async def _circuit_check(env: Any, key: str) -> str:
+    """Return "closed" | "open" | "half_open" for a breaker key."""
+    try:
+        rows = await _db_all(env.DB.prepare(
+            "SELECT consecutive_failures, opened_at, half_open_after_ms "
+            "FROM etl_circuit_state WHERE key = ?"
+        ).bind(key))
+        if not rows:
+            return "closed"
+        r = rows[0]
+        failures = int(r[0] if not isinstance(r, dict) else r.get("consecutive_failures") or 0)
+        if failures < CB_THRESHOLD:
+            return "closed"
+        opened_at = r[1] if not isinstance(r, dict) else r.get("opened_at")
+        cooldown = r[2] if not isinstance(r, dict) else r.get("half_open_after_ms")
+        opened_at = int(opened_at) if opened_at is not None else 0
+        cooldown = int(cooldown) if cooldown else CB_COOLDOWN_MS
+        if _now_ms() - opened_at < cooldown:
+            return "open"
+        return "half_open"
+    except Exception:
+        # Fail OPEN: a broken breaker table must not block ETL.
+        return "closed"
+
+
+async def _circuit_record_success(env: Any, key: str) -> None:
+    """Close the breaker: clear all state for the key."""
+    try:
+        await env.DB.prepare("DELETE FROM etl_circuit_state WHERE key = ?").bind(key).run()
+    except Exception:
+        pass  # fail open
+
+
+async def _circuit_record_failure(env: Any, key: str) -> None:
+    """Increment failures; set/refresh opened_at when the threshold is crossed.
+
+    Refreshing opened_at on every failure at/above the threshold also gives a
+    failing half-open probe a fresh cooldown (re-open + increment).
+    """
+    try:
+        await env.DB.prepare(
+            "INSERT INTO etl_circuit_state (key, consecutive_failures, opened_at, half_open_after_ms) "
+            "VALUES (?, 1, NULL, ?) "
+            "ON CONFLICT(key) DO UPDATE SET "
+            "  consecutive_failures = consecutive_failures + 1, "
+            "  opened_at = CASE WHEN consecutive_failures + 1 >= ? THEN ? "
+            "                   ELSE etl_circuit_state.opened_at END"
+        ).bind(key, CB_COOLDOWN_MS, CB_THRESHOLD, _now_ms()).run()
+    except Exception:
+        pass  # fail open
+
+
+async def _circuit_mark_probe(env: Any, key: str) -> None:
+    """Best-effort half-open single-flight gate.
+
+    While a half-open probe is being processed, refresh opened_at so every
+    other concurrent check sees "open" and does not join. This is racy under
+    true parallel consumers (two probes may slip through); that is acceptable
+    — the probe result (success closes, failure re-opens) is what matters.
+    """
+    try:
+        await env.DB.prepare(
+            "UPDATE etl_circuit_state SET opened_at = ? WHERE key = ?"
+        ).bind(_now_ms(), key).run()
+    except Exception:
+        pass  # fail open
 
 
 def coerce_payload(body: Any) -> Dict[str, Any]:
@@ -208,6 +297,19 @@ async def handle_queue_message(env: Any, message: Any) -> None:
     version = int(payload.get("version", 1))
     reindex = bool(payload.get("reindex", False))
 
+    # Retry circuit breaker (per tenant) — checked before doing any work.
+    circuit_key = f"etl:{tenant_id}"
+    circuit_state = await _circuit_check(env, circuit_key)
+    if circuit_state == "open":
+        # Trip: dead-letter immediately, do NOT retry, and ack. The document
+        # must be consumable again later via the DLQ reprocess operator path.
+        logger.info("etl.circuit.open tenant=%s document=%s", tenant_id, document_id)
+        return await _dlq_circuit_open(env, message, document_id, tenant_id, attempt)
+    if circuit_state == "half_open":
+        # Allow ONE probe through; mark it in-flight so parallel messages see
+        # "open" again (best-effort single flight, races are acceptable).
+        await _circuit_mark_probe(env, circuit_key)
+
     # Fetch document content from D1.
     try:
         row = await env.DB.prepare(
@@ -231,10 +333,12 @@ async def handle_queue_message(env: Any, message: Any) -> None:
                                     version=version, attempt=attempt, reindex=reindex)
 
     if result["status"] == "ok":
+        await _circuit_record_success(env, circuit_key)
         message.ack()
         return
 
     if result["status"] == "retry" and attempt < MAX_RETRIES:
+        await _circuit_record_failure(env, circuit_key)
         # Re-enqueue with incremented attempt for retry.
         try:
             await env.ETL_QUEUE.send(json.dumps({
@@ -252,6 +356,7 @@ async def handle_queue_message(env: Any, message: Any) -> None:
         return
 
     # Dead-letter: mark document failed and send to DLQ.
+    await _circuit_record_failure(env, circuit_key)
     try:
         await env.DB.prepare(
             "UPDATE documents SET status = 'failed', error = ? WHERE id = ? AND tenant_id = ?"
@@ -282,3 +387,32 @@ async def _retry_message(message: Any) -> None:
     except Exception:
         # The platform owns retrying an unacknowledged message when retry() itself fails.
         pass
+
+
+async def _dlq_circuit_open(env: Any, message: Any, document_id: Any,
+                            tenant_id: Any, attempt: int) -> None:
+    """Dead-letter a message while the tenant circuit is open.
+
+    Ack without retrying so an open breaker cannot re-flood the queue. The
+    document is best-effort marked `failed` with reason `circuit_open`; the
+    DLQ payload carries the same reason for later reprocessing.
+    """
+    try:
+        await env.DB.prepare(
+            "UPDATE documents SET status = 'failed', error = ? WHERE id = ? AND tenant_id = ?"
+        ).bind("circuit_open", document_id, tenant_id).run()
+    except Exception:
+        pass  # do not let a status write fail the DLQ path
+    try:
+        await env.ETL_DLQ.send(json.dumps({
+            "job": "etl.process",
+            "document_id": document_id,
+            "tenant_id": tenant_id,
+            "attempt": attempt,
+            "reason": "circuit_open",
+        }))
+    except Exception:
+        # DLQ unavailable: fall back to a platform retry rather than losing work.
+        await _retry_message(message)
+        return
+    message.ack()

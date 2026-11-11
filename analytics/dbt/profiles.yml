@@ -1,0 +1,13 @@
+jd_analytics:
+  target: local
+  outputs:
+    local:
+      type: postgres
+      host: "{{ env_var('ANALYTICS_PGHOST', '127.0.0.1') }}"
+      port: "{{ env_var('ANALYTICS_PGPORT', '55439') | int }}"
+      user: "{{ env_var('ANALYTICS_PGUSER', 'postgres') }}"
+      password: "{{ env_var('ANALYTICS_PGPASSWORD') }}"
+      dbname: "{{ env_var('ANALYTICS_PGDATABASE') }}"
+      schema: analytics
+      threads: 2
+      connect_timeout: 10

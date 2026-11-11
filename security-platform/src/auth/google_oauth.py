@@ -176,3 +176,19 @@ def get_current_user(request: Request) -> Dict[str, Any]:
         "tenant_id": payload.get("tenant_id"),
         "email": payload.get("email"),
     }
+
+
+def get_current_user_optional(request: Request) -> Optional[Dict[str, Any]]:
+    """Optional dependency: return JWT payload if a valid Bearer token is present, else None."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    token = auth[len("Bearer "):]
+    payload = decode_access_token(token)
+    if payload is None:
+        return None
+    return {
+        "user_id": payload.get("sub"),
+        "tenant_id": payload.get("tenant_id"),
+        "email": payload.get("email"),
+    }

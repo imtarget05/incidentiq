@@ -32,7 +32,7 @@ def test_list_assets_uses_tenant_isolation(fake_conn):
         },
     ]
 
-    with patch("queries.get_conn", return_value=conn), patch("queries.put_conn"):
+    with patch("db.get_conn", return_value=conn), patch("db.put_conn"):
         from queries import list_assets
 
         rows, total = list_assets("t1", limit=10, offset=0)
@@ -60,7 +60,7 @@ def test_create_alert_returns_row(fake_conn):
         "resolved_at": None,
     }
 
-    with patch("queries.get_conn", return_value=conn), patch("queries.put_conn"):
+    with patch("db.get_conn", return_value=conn), patch("db.put_conn"):
         from queries import create_alert
 
         result = create_alert(

@@ -24,18 +24,22 @@ host, dependency security, and seed/benchmark data.
 ```bash
 cd security-platform
 
-# 1. Start Postgres + app
+# 1. Copy env example and review values
+cp .env.example .env
+
+# 2. Start Postgres + app
 docker compose up --build -d
 
-# 2. Seed data (optional)
+# 3. Seed data (optional)
 psql "$DATABASE_URL" -f seed/seed.sql
 
-# 3. Call the API
+# 4. Call the API
 curl -H "X-Api-Key: acme_live" http://localhost:8000/health
 curl -H "X-Api-Key: acme_live" http://localhost:8000/api/v1/assets
 ```
 
-Default local DSN: `postgresql://security:security@localhost:5432/security_dashboard`
+`/health` now reports `database: down` when PostgreSQL is unreachable. Default local DSN
+comes from `DATABASE_URL` (see `.env.example`); no credentials are hard-coded in the image.
 
 The seed database includes three tenants (`acme_live`, `globex_live`, `soylent_live`)
 with assets, vulnerabilities, alerts, incidents, scan results, and audit logs —

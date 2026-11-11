@@ -27,9 +27,10 @@ def test_register_tenant(client: TestClient) -> None:
         json={"name": "integration-tenant", "api_key": "int_live_abcd1234"},
     )
     assert resp.status_code in (200, 409), resp.text
-    body = resp.json()
-    assert body["name"] == "integration-tenant"
-    assert "id" in body
+    if resp.status_code == 200:
+        body = resp.json()
+        assert body["name"] == "integration-tenant"
+        assert "id" in body
 
 
 def test_missing_api_key_rejected(client: TestClient) -> None:

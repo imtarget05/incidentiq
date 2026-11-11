@@ -85,5 +85,5 @@ print('migrations applied')
 
       - name: Dependency scan (pip-audit)
         run: |
-          pip install pip-audit || true
-          pip-audit -r security-platform/requirements.txt || true
+          pip install pip-audit
+          pip-audit -r security-platform/requirements.txt

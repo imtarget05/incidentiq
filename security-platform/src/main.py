@@ -28,7 +28,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import (
-    Depends,
     FastAPI,
     Header,
     HTTPException,
@@ -39,7 +38,7 @@ from fastapi import (
 )
 from psycopg2.errors import UniqueViolation
 
-from db import get_conn, put_conn, run_migration
+from db import get_conn, put_conn, run_migration, health_check
 from models import (
     AlertCreate,
     AlertOut,
@@ -92,10 +91,9 @@ app = FastAPI(title="Cybersecurity Dashboard API", version="1.0.0")
 
 @app.on_event("startup")
 def _startup() -> None:
-    try:
-        run_migration(MIGRATION_PATH)
-    except Exception as exc:  # pragma: no cover - best effort at startup
-        print(f"[security-platform] migration warning: {exc}")
+    if not health_check():
+        raise RuntimeError("security-platform: cannot connect to database on startup")
+    run_migration(MIGRATION_PATH)
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +143,9 @@ def require_tenant(request: Request) -> Dict[str, Any]:
 
 @app.get("/health", tags=["Health"])
 def health() -> Dict[str, str]:
-    return {"status": "ok", "service": "security-platform"}
+    db_ok = health_check()
+    status = "ok" if db_ok else "degraded"
+    return {"status": status, "service": "security-platform", "database": "up" if db_ok else "down"}
 
 
 # ---------------------------------------------------------------------------
@@ -204,9 +204,11 @@ def get_asset_endpoint(request: Request, asset_id: str = Path(...)) -> Any:
 def update_asset_endpoint(
     request: Request,
     asset_id: str = Path(...),
-    payload: AssetUpdate = Depends(),
+    payload: AssetUpdate = None,
 ) -> Any:
     tenant = require_tenant(request)
+    if payload is None:
+        raise HTTPException(status_code=400, detail="request body is required")
     asset = update_asset(asset_id, tenant["id"], payload.model_dump(exclude_unset=True))
     if asset is None:
         raise HTTPException(status_code=404, detail="asset not found")
@@ -305,9 +307,11 @@ def get_alert_endpoint(request: Request, alert_id: str = Path(...)) -> Any:
 def update_alert_endpoint(
     request: Request,
     alert_id: str = Path(...),
-    payload: AlertUpdate = Depends(),
+    payload: AlertUpdate = None,
 ) -> Any:
     tenant = require_tenant(request)
+    if payload is None:
+        raise HTTPException(status_code=400, detail="request body is required")
     alert = update_alert(alert_id, tenant["id"], payload.model_dump(exclude_unset=True))
     if alert is None:
         raise HTTPException(status_code=404, detail="alert not found")
@@ -380,10 +384,10 @@ def get_incident_endpoint(request: Request, incident_id: str = Path(...)) -> Any
 def update_incident_status_endpoint(
     request: Request,
     incident_id: str = Path(...),
-    payload: IncidentUpdate = Depends(),
+    payload: IncidentUpdate = None,
 ) -> Any:
     tenant = require_tenant(request)
-    if payload.status is None:
+    if payload is None or payload.status is None:
         raise HTTPException(status_code=400, detail="status field is required")
     incident = update_incident_status(incident_id, tenant["id"], payload.status)
     if incident is None:

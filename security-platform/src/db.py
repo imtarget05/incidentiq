@@ -11,10 +11,9 @@ from typing import Any, Dict, List, Optional
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 
-_DSN = os.getenv(
-    "DATABASE_URL",
-    "postgresql://security:security@localhost:5432/security_dashboard",
-)
+_DSN = os.getenv("DATABASE_URL")
+if not _DSN:
+    raise RuntimeError("DATABASE_URL environment variable is required")
 
 _pool: Optional[pool.ThreadedConnectionPool] = None
 
@@ -24,7 +23,23 @@ def get_pool() -> pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
         _pool = pool.ThreadedConnectionPool(minconn=1, maxconn=10, dsn=_DSN)
+        # Validate the pool can actually obtain a connection.
+        _pool.getconn().close()
     return _pool
+
+
+def health_check() -> bool:
+    """Return True when a connection can be obtained and a simple query runs."""
+    try:
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+        finally:
+            put_conn(conn)
+        return True
+    except Exception:
+        return False
 
 
 def get_conn():

@@ -153,7 +153,13 @@ async def process_document(env: Any, document_id: str, tenant_id: str,
             pass
         return {"status": "ok", "chunks": 0}
 
-    vectors = await embed_texts(env, chunks)
+    # DR-drill failure injection: when the deployment sets ETL_TEST_FAIL_EMBEDDING,
+    # embeddings are reported as missing so the retry->DLQ path can be exercised
+    # end-to-end (document ends in status 'failed', message lands in the DLQ).
+    if str(getattr(env, "ETL_TEST_FAIL_EMBEDDING", "") or "").strip().lower() in ("1", "true", "yes"):
+        vectors: list[Any | None] = [None] * len(chunks)
+    else:
+        vectors = await embed_texts(env, chunks)
     if len(vectors) != len(chunks) or any(vector is None for vector in vectors):
         reason = "embedding_incomplete"
         return {

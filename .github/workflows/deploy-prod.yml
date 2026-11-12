@@ -18,7 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: production          # requires branch-protection approval
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PROD_API_TOKEN }}
+      # Prefer the scoped production token; fall back to the existing account token.
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PROD_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       PROD_API_WORKER_URL: ${{ vars.PROD_API_WORKER_URL }}
       PROD_MCP_WORKER_URL: ${{ vars.PROD_MCP_WORKER_URL }}

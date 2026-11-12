@@ -8,12 +8,12 @@ import main
 
 
 def test_startup_rejects_missing_cloudflare_bindings() -> None:
-    with pytest.raises(RuntimeError, match="D1_DATABASE_ID.*VECTORIZE_INDEX_NAME.*ETL_QUEUE_NAME.*ETL_DLQ_NAME"):
+    with pytest.raises(RuntimeError, match="DB.*VECTORIZE_INDEX.*ETL_QUEUE.*ETL_DLQ.*ai"):
         main._validate_startup_config(SimpleNamespace())
 
 
-def test_startup_accepts_all_required_bindings() -> None:
-    env = SimpleNamespace(**{name: "configured" for name in main._REQUIRED_ENV_VARS})
+def test_startup_accepts_bindings_declared_by_wrangler() -> None:
+    env = SimpleNamespace(DB=object(), VECTORIZE_INDEX=object(), ETL_QUEUE=object(), ETL_DLQ=object(), ai=object())
     main._validate_startup_config(env)
 
 

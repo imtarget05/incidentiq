@@ -195,10 +195,11 @@ def _env(request: Request) -> Any:
 # ---------------------------------------------------------------------------
 
 _REQUIRED_ENV_VARS = (
-    "D1_DATABASE_ID",
-    "VECTORIZE_INDEX_NAME",
-    "ETL_QUEUE_NAME",
-    "ETL_DLQ_NAME",
+    "DB",
+    "VECTORIZE_INDEX",
+    "ETL_QUEUE",
+    "ETL_DLQ",
+    "ai",
 )
 
 

@@ -191,14 +191,14 @@
     try {
       const r = await apiFetch(`${API}/api/v1/documents`, {
         method: "POST",
-        headers: authHeaders("doc-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8)),
+        headers: authHeaders("doc-" + crypto.randomUUID()),
         body: fd,
       }, 1);
       const d = await r.json();
       if (r.ok) {
         msg("uploadMsg", "✅ Đã tải lên: " + (d.document_id || ""), "ok");
         input.value = "";
-        listDocs();
+        void listDocs();
       } else {
         msg("uploadMsg", "❌ Lỗi: " + ((d.error && d.error.message) || r.status), "err");
       }

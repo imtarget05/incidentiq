@@ -41,6 +41,13 @@ jobs:
         run: npm ci
         working-directory: mcp
 
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.7"
+
+      - name: Install root Wrangler for Python Worker packaging
+        run: npm ci --ignore-scripts
+
       - name: Lint Python
         run: ruff check --select E4,E7,E9,F api/src tests/api scripts
 
@@ -61,8 +68,8 @@ jobs:
 
       - name: Validate Wrangler configurations without credentials
         run: |
-          mcp/node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/incidentiq-api-dry
-          mcp/node_modules/.bin/wrangler deploy --dry-run --config wrangler.etl.toml --outdir /tmp/incidentiq-etl-dry
+          uv run pywrangler deploy --dry-run --outdir /tmp/incidentiq-api-dry
+          uv run pywrangler deploy --dry-run --config wrangler.etl.toml --outdir /tmp/incidentiq-etl-dry
           mcp/node_modules/.bin/wrangler deploy --dry-run --config mcp/wrangler.toml --outdir /tmp/incidentiq-mcp-dry
 
       - name: Require SonarQube Server configuration

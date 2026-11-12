@@ -32,6 +32,13 @@ jobs:
         with:
           node-version: "22"
 
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.7"
+
+      - name: Install root Wrangler for Python Worker packaging
+        run: npm ci --ignore-scripts
+
       - name: Install pinned Wrangler from MCP lockfile
         run: npm ci --ignore-scripts
         working-directory: mcp
@@ -91,8 +98,8 @@ jobs:
       - name: Validate only preview Worker configurations
         run: |
           export PATH="$PWD/mcp/node_modules/.bin:$PATH"
-          wrangler deploy --dry-run --config wrangler.preview.toml --outdir /tmp/incidentiq-preview-api
-          wrangler deploy --dry-run --config wrangler.etl.preview.toml --outdir /tmp/incidentiq-preview-etl
+          uv run pywrangler deploy --dry-run --config wrangler.preview.toml --outdir /tmp/incidentiq-preview-api
+          uv run pywrangler deploy --dry-run --config wrangler.etl.preview.toml --outdir /tmp/incidentiq-preview-etl
           wrangler deploy --dry-run --config mcp/wrangler.preview.toml --outdir /tmp/incidentiq-preview-mcp
 
       - name: Apply migrations to preview D1 only
@@ -103,8 +110,8 @@ jobs:
       - name: Deploy preview Workers
         run: |
           export PATH="$PWD/mcp/node_modules/.bin:$PATH"
-          wrangler deploy --config wrangler.preview.toml
-          wrangler deploy --config wrangler.etl.preview.toml
+          uv run pywrangler deploy --config wrangler.preview.toml
+          uv run pywrangler deploy --config wrangler.etl.preview.toml
           wrangler deploy --config mcp/wrangler.preview.toml
 
       - name: Verify preview API behavior

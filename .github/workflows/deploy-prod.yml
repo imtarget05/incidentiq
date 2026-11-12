@@ -30,6 +30,13 @@ jobs:
         with:
           node-version: "22"
 
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.7"
+
+      - name: Install root Wrangler for Python Worker packaging
+        run: npm ci --ignore-scripts
+
       - name: Install pinned Wrangler from MCP lockfile
         run: npm ci --ignore-scripts
         working-directory: mcp
@@ -71,8 +78,8 @@ jobs:
       - name: Validate production Wrangler configurations (dry run)
         run: |
           export PATH="$PWD/mcp/node_modules/.bin:$PATH"
-          wrangler deploy --dry-run --outdir /tmp/incidentiq-prod-api
-          wrangler deploy --dry-run --config wrangler.etl.toml --outdir /tmp/incidentiq-prod-etl
+          uv run pywrangler deploy --dry-run --outdir /tmp/incidentiq-prod-api
+          uv run pywrangler deploy --dry-run --config wrangler.etl.toml --outdir /tmp/incidentiq-prod-etl
           wrangler deploy --dry-run --config mcp/wrangler.toml --outdir /tmp/incidentiq-prod-mcp
 
       - name: Apply D1 migrations to production
@@ -83,8 +90,8 @@ jobs:
       - name: Deploy production Workers
         run: |
           export PATH="$PWD/mcp/node_modules/.bin:$PATH"
-          wrangler deploy
-          wrangler deploy --config wrangler.etl.toml
+          uv run pywrangler deploy
+          uv run pywrangler deploy --config wrangler.etl.toml
           wrangler deploy --config mcp/wrangler.toml
 
       - name: Smoke test production API

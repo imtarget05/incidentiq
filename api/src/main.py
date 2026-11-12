@@ -31,16 +31,16 @@ Environment bindings (wrangler.toml):
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
-import asyncio
 import re
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 try:  # Provided by the Workers runtime; absent in local pytest runs.
@@ -55,7 +55,7 @@ except ImportError:  # pragma: no cover - local test fallback
 import etl
 
 
-def _rows(result: Any) -> List[Any]:
+def _rows(result: Any) -> list[Any]:
     """Normalize a D1 `.all()` result: the runtime returns {results, success, meta}."""
     if isinstance(result, dict):
         return list(result.get("results") or [])
@@ -65,7 +65,7 @@ def _rows(result: Any) -> List[Any]:
     return list(result or [])
 
 
-async def _db_all(stmt: Any) -> List[Any]:
+async def _db_all(stmt: Any) -> list[Any]:
     res = stmt.all()
     if inspect.isawaitable(res):
         res = await res
@@ -77,7 +77,7 @@ app = FastAPI(title="AI Knowledge Platform", version="1.0.0")
 # Observability: correlation IDs, structured logging, rate limits, quota.
 # ---------------------------------------------------------------------------
 
-_REQUEST_LOG: List[Dict[str, Any]] = []
+_REQUEST_LOG: list[dict[str, Any]] = []
 _MAX_REQUEST_LOG = 5000
 
 
@@ -221,7 +221,7 @@ def _validate_startup_config(env: Any) -> None:
         )
 
 
-async def _tenant_from_api_key(env: Any, api_key: str) -> Optional[Dict[str, Any]]:
+async def _tenant_from_api_key(env: Any, api_key: str) -> dict[str, Any] | None:
     """Validate an API key and return the tenant row."""
     if not api_key or len(api_key) < 8:
         return None
@@ -246,7 +246,7 @@ async def _tenant_from_api_key(env: Any, api_key: str) -> Optional[Dict[str, Any
 
 
 async def get_tenant(request: Request,
-                     x_api_key: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+                     x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
     """FastAPI dependency: authenticate tenant via X-Api-Key."""
     env = _env(request)
     if env is None:
@@ -261,7 +261,7 @@ async def get_tenant(request: Request,
 
 
 async def _audit(env: Any, tenant_id: str, actor: str, action: str,
-                 resource: str, metadata: Dict[str, Any]) -> None:
+                 resource: str, metadata: dict[str, Any]) -> None:
     try:
         await env.DB.prepare(
             "INSERT INTO audit_logs (id, tenant_id, actor, action, resource, metadata, created_at) "
@@ -272,11 +272,11 @@ async def _audit(env: Any, tenant_id: str, actor: str, action: str,
         pass
 
 
-def _chunk_text(text: str, max_chars: int = 800) -> List[str]:
+def _chunk_text(text: str, max_chars: int = 800) -> list[str]:
     text = re.sub(r"\s+", " ", text or "").strip()
     if not text:
         return []
-    chunks: List[str] = []
+    chunks: list[str] = []
     while len(text) > max_chars:
         cut = text.rfind(" ", 0, min(max_chars + 1, len(text)))
         if cut <= 0:
@@ -288,7 +288,7 @@ def _chunk_text(text: str, max_chars: int = 800) -> List[str]:
     return chunks
 
 
-async def _queue_send(binding: Any, payload: Dict[str, Any]) -> bool:
+async def _queue_send(binding: Any, payload: dict[str, Any]) -> bool:
     """Send an ETL job to the queue, awaiting the binding if it is awaitable."""
     if binding is None:
         return False
@@ -303,7 +303,7 @@ async def _queue_send(binding: Any, payload: Dict[str, Any]) -> bool:
 
 async def _dispatch_etl(env: Any, document_id: str, tenant_id: str,
                         content: str, filename: str,
-                        version: int = 1, reindex: bool = False) -> Dict[str, Any]:
+                        version: int = 1, reindex: bool = False) -> dict[str, Any]:
     """Process a document via ETL.
 
     ETL_MODE=inline (default) runs chunk/embed/upsert in-request so documents
@@ -339,7 +339,7 @@ async def _dispatch_etl(env: Any, document_id: str, tenant_id: str,
     return {"status": "queued" if queued else "failed"}
 
 
-async def _drop_document_vectors(env: Any, document_id: str, tenant_id: str) -> List[str]:
+async def _drop_document_vectors(env: Any, document_id: str, tenant_id: str) -> list[str]:
     """Delete indexed vectors and surface errors before removing D1 source records."""
     chunks = await _db_all(env.DB.prepare(
         "SELECT id, vector_id FROM chunks WHERE document_id = ? AND tenant_id = ?"
@@ -369,6 +369,10 @@ def _safe_json(value: Any) -> Any:
         return None
     if isinstance(value, (list, dict)):
         return value
+    try:
+        return json.loads(value)
+    except Exception:
+        return value
 
 
 def _llm_text(llm: Any) -> str:
@@ -385,10 +389,6 @@ def _llm_text(llm: Any) -> str:
         return str(llm["choices"][0]["message"]["content"] or "")
     except (KeyError, IndexError, TypeError):
         return ""
-    try:
-        return json.loads(value)
-    except Exception:
-        return value
 
 
 def _row_col(row: Any, name: str, idx: int) -> Any:
@@ -410,7 +410,7 @@ STATUS_TRANSITIONS = {
 }
 
 
-async def _tenant_workspaces(env: Any, tenant_id: str) -> List[Dict[str, Any]]:
+async def _tenant_workspaces(env: Any, tenant_id: str) -> list[dict[str, Any]]:
     """Return workspaces the tenant is a member of, with their role."""
     try:
         rows = await _db_all(env.DB.prepare(
@@ -422,7 +422,7 @@ async def _tenant_workspaces(env: Any, tenant_id: str) -> List[Dict[str, Any]]:
         ).bind(tenant_id))
     except Exception:
         return []
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for r in rows or []:
         out.append({
             "id": _row_col(r, "id", 0),
@@ -434,7 +434,7 @@ async def _tenant_workspaces(env: Any, tenant_id: str) -> List[Dict[str, Any]]:
     return out
 
 
-async def _get_workspace_for_tenant(env: Any, tenant_id: str, workspace_id: str) -> Optional[Dict[str, Any]]:
+async def _get_workspace_for_tenant(env: Any, tenant_id: str, workspace_id: str) -> dict[str, Any] | None:
     for ws in await _tenant_workspaces(env, tenant_id):
         if ws["id"] == workspace_id:
             return ws
@@ -450,7 +450,7 @@ def require_role(min_role: str = "reader"):
 
     async def dep(request: Request,
                   tenant: dict = Depends(get_tenant),
-                  x_workspace_id: Optional[str] = Header(default=None)):
+                  x_workspace_id: str | None = Header(default=None)):
         env = _env(request)
         if env is None:
             raise HTTPException(status_code=500, detail="environment not configured")
@@ -473,7 +473,7 @@ def require_role(min_role: str = "reader"):
     return dep
 
 
-async def get_workspace_ctx(request: Request) -> Dict[str, Any]:
+async def get_workspace_ctx(request: Request) -> dict[str, Any]:
     """Read workspace context previously set by require_role."""
     return {
         "tenant": getattr(request.state, "tenant", None),
@@ -505,7 +505,7 @@ async def health_live(request: Request):
 async def health_ready(request: Request):
     """Kubernetes/uptime readiness probe — returns 200 only when all bindings are available."""
     env = _env(request)
-    checks: Dict[str, str] = {}
+    checks: dict[str, str] = {}
     overall = "ok"
 
     # Check D1 database binding.
@@ -559,7 +559,7 @@ async def health_ready(request: Request):
 async def upload_document(request: Request,
                           ctx: dict = Depends(require_role("investigator")),
                           file: UploadFile = File(...),
-                          idempotency_key: Optional[str] = Header(default=None)):
+                          idempotency_key: str | None = Header(default=None)):
     env = _env(request)
     tenant_id = ctx["tenant"]["id"]
 
@@ -802,7 +802,7 @@ async def create_workspace(request: Request,
 @app.post("/api/v1/incidents")
 async def create_incident(request: Request,
                           ctx: dict = Depends(require_role("investigator")),
-                          idempotency_key: Optional[str] = Header(default=None)):
+                          idempotency_key: str | None = Header(default=None)):
     env = _env(request)
     tenant = ctx["tenant"]
     tenant_id = tenant["id"]
@@ -901,7 +901,7 @@ async def get_incident(incident_id: str, request: Request, ctx: dict = Depends(r
 @app.patch("/api/v1/incidents/{incident_id}")
 async def update_incident(incident_id: str, request: Request,
                           ctx: dict = Depends(require_role("investigator")),
-                          if_match: Optional[str] = Header(default=None)):
+                          if_match: str | None = Header(default=None)):
     env = _env(request)
     tenant_id = ctx["tenant"]["id"]
     workspace_id = ctx["workspace_id"]
@@ -1048,7 +1048,7 @@ async def get_incident_timeline(incident_id: str, request: Request, ctx: dict = 
 async def metrics_quota(request: Request, ctx: dict = Depends(require_role("reader"))):
     env = _env(request)
     tenant_id = ctx["tenant"]["id"]
-    buckets: List[Dict[str, Any]] = []
+    buckets: list[dict[str, Any]] = []
     try:
         rows = await _db_all(env.DB.prepare(
             "SELECT bucket_key, count, window_start FROM rate_limit_buckets WHERE tenant_id = ?"
@@ -1104,7 +1104,7 @@ READ_ONLY_CHECKS = {
 }
 
 
-def _read_only_checks(service: str, logs_hint: str) -> List[str]:
+def _read_only_checks(service: str, logs_hint: str) -> list[str]:
     key = None
     text = f"{service} {logs_hint}".lower()
     for k in READ_ONLY_CHECKS:
@@ -1138,9 +1138,9 @@ async def _record_token_usage(env: Any, tenant_id: str, endpoint: str, model: st
 
 
 async def _store_triage_report(env: Any, incident_id: str, tenant_id: str, status: str,
-                                summary: str, hypotheses: List[Dict[str, Any]],
-                                evidence: List[Dict[str, Any]], similar: List[str],
-                                read_only_checks: List[str], citations: List[Dict[str, Any]]) -> None:
+                                summary: str, hypotheses: list[dict[str, Any]],
+                                evidence: list[dict[str, Any]], similar: list[str],
+                                read_only_checks: list[str], citations: list[dict[str, Any]]) -> None:
     await env.DB.prepare(
         "INSERT INTO triage_reports (id, incident_id, tenant_id, status, summary, hypotheses, "
         "evidence, similar_incidents, read_only_checks, citations, created_at) "
@@ -1150,15 +1150,15 @@ async def _store_triage_report(env: Any, incident_id: str, tenant_id: str, statu
            json.dumps(read_only_checks), json.dumps(citations), _now_ms()).run()
 
 
-async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -> list[dict[str, Any]]:
     """Hybrid retrieval: Vectorize semantic + D1 FTS5 keyword, merged and re-ranked.
     Both paths are tenant-isolated. Failures in one path do not fail the other.
     """
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     seen: set = set()
 
     # 1. Vectorize semantic search (tenant-isolated via metadata filter).
-    question_vector: Optional[List[float]] = None
+    question_vector: list[float] | None = None
     try:
         embed = await env.ai.run("@cf/qwen/qwen3-embedding-0.6b", {"text": [query]})
         vectors = embed.get("vectors") or embed.get("data") or []
@@ -1221,7 +1221,7 @@ async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -
 
 
 async def _similar_incidents(env: Any, tenant_id: str, incident_id: str,
-                       service: str, limit: int = 5) -> List[str]:
+                       service: str, limit: int = 5) -> list[str]:
     try:
         rows = await _db_all(env.DB.prepare(
             "SELECT id FROM incidents WHERE tenant_id = ? AND service = ? AND id != ? "
@@ -1229,7 +1229,7 @@ async def _similar_incidents(env: Any, tenant_id: str, incident_id: str,
         ).bind(tenant_id, service, incident_id, limit))
     except Exception:
         return []
-    out: List[str] = []
+    out: list[str] = []
     for r in rows or []:
         out.append(r[0] if not isinstance(r, dict) else r.get("id"))
     return out
@@ -1275,9 +1275,9 @@ async def triage_incident(incident_id: str, request: Request,
     # Hybrid retrieval.
     context_chunks = await _hybrid_search(env, tenant_id, query)
 
-    citations: List[Dict[str, Any]] = []
-    context_parts: List[str] = []
-    evidence: List[Dict[str, Any]] = []
+    citations: list[dict[str, Any]] = []
+    context_parts: list[str] = []
+    evidence: list[dict[str, Any]] = []
     for idx, ch in enumerate(context_chunks, start=1):
         context_parts.append(f"[{idx}] {ch['content']}")
         citations.append({
@@ -1343,7 +1343,7 @@ async def triage_incident(incident_id: str, request: Request,
         ai_available = False
 
     # Parse structured JSON from LLM; fall back gracefully.
-    hypotheses: List[Dict[str, Any]] = []
+    hypotheses: list[dict[str, Any]] = []
     summary = "Có bằng chứng nhưng không thể tổng hợp tự động."
     if answer_text.strip():
         raw = answer_text.strip()
@@ -1434,7 +1434,7 @@ async def get_incident_report(incident_id: str, request: Request,
 @app.post("/api/v1/question")
 async def ask_question(request: Request,
                        tenant: dict = Depends(get_tenant),
-                       idempotency_key: Optional[str] = Header(default=None)):
+                       idempotency_key: str | None = Header(default=None)):
     env = _env(request)
     tenant_id = tenant["id"]
 
@@ -1463,7 +1463,7 @@ async def ask_question(request: Request,
         return JSONResponse({"status": "duplicate"}, status_code=202)
 
     # 1. Embed the question.
-    question_vector: Optional[List[float]] = None
+    question_vector: list[float] | None = None
     try:
         embed = await env.ai.run("@cf/qwen/qwen3-embedding-0.6b", {"text": [question]})
         vectors = embed.get("vectors") or embed.get("data") or []
@@ -1472,7 +1472,7 @@ async def ask_question(request: Request,
         question_vector = None
 
     # 2. Vector search (tenant-isolated via metadata filter).
-    context_chunks: List[Dict[str, Any]] = []
+    context_chunks: list[dict[str, Any]] = []
     if question_vector:
         try:
             results = await env.VECTORIZE_INDEX.query(question_vector, {
@@ -1495,8 +1495,8 @@ async def ask_question(request: Request,
             context_chunks = []
 
     # 3. Build cited context.
-    context_parts: List[str] = []
-    citations: List[Dict[str, Any]] = []
+    context_parts: list[str] = []
+    citations: list[dict[str, Any]] = []
     for idx, ch in enumerate(context_chunks, start=1):
         context_parts.append(f"[{idx}] {ch['content']}")
         citations.append({"id": idx, "document_id": ch["document_id"],
@@ -1546,7 +1546,7 @@ async def ask_question(request: Request,
 # API v2 — load versioned router.
 # ---------------------------------------------------------------------------
 try:
-    from v2 import _v2  # noqa: E402  (import after app is defined)
+    from v2 import _v2
     app.include_router(_v2)
 except ImportError:
     pass  # v2 module not available in test harness — skip gracefully.

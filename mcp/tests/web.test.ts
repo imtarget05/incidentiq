@@ -20,10 +20,10 @@ async function startApp() {
 beforeEach(() => {
   localStorage.clear();
   document.body.innerHTML = ids.map((id) => {
-    const tag = id === "docList" || id === "incTimeline" ? "ul" : id.startsWith("btn") ? "button" :
+    const tag = id === "docList" || id === "incTimeline" ? "ul" : id.startsWith("tab-") ? "main" : id.startsWith("btn") ? "button" :
       id.endsWith("Input") || ["incTitle", "incSeverity", "incService", "incEnv", "incIdem", "incLookupId"].includes(id) ? "input" : "div";
-    return `<${tag} id="${id}"></${tag}>`;
-  }).join("");
+    return `<${tag} id="${id}"${id.startsWith("tab-") ? ' class="wrap"' : ""}></${tag}>`;
+  }).join("") + '<button class="tab-btn" data-tab="main"></button><button class="tab-btn" data-tab="health"></button>';
   vi.stubGlobal("crypto", { randomUUID: () => "uuid-123" });
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     if (url.includes("/documents")) return { json: async () => ({ documents: [] }) };
@@ -145,5 +145,26 @@ describe("web dashboard", () => {
     document.getElementById("btnAsk")?.click();
     await vi.waitFor(() => expect(document.getElementById("answerError")?.textContent).toContain("503: Unavailable"));
     expect(document.getElementById("btnRetryAsk")?.hidden).toBe(false);
+  });
+
+  it("switches tabs and reports degraded health without an API key", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      json: async () => ({ status: "degraded", checks: { d1: "unavailable", ai: "failed" } }),
+    })));
+    await startApp();
+    (document.querySelector('.tab-btn[data-tab="health"]') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.getElementById("healthDashboard")?.textContent).toContain("degraded"));
+    expect(document.getElementById("tab-main")?.hidden).toBe(true);
+    expect(document.getElementById("tab-health")?.hidden).toBe(false);
+    expect(document.getElementById("quotaDashboard")?.textContent).toContain("API key");
+    expect(document.querySelector('.tab-btn[data-tab="health"]')?.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("rejects an incomplete incident before sending it", async () => {
+    localStorage.setItem("incidentiq_api_key", "secret-key");
+    await startApp();
+    document.getElementById("btnCreateInc")?.click();
+    expect(document.getElementById("incMsg")?.textContent).toContain("đầy đủ");
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1); // initial document list only
   });
 });

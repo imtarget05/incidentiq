@@ -80,7 +80,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.projectKey=incidentiq
+            -Dsonar.projectKey=imtarget05_incidentiq
             -Dsonar.organization=imtarget05
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300

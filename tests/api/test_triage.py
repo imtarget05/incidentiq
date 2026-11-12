@@ -13,19 +13,25 @@ class FakeVectorize:
         self.upserted = []
         self.deleted = []
 
-    async def query(self, vector=None, topK=None, returnMetadata=None, filter=None):
+    async def query(self, vector=None, options=None, **kwargs):
+        # Prod calls the v2 positional form query(vector, {"topK": ...});
+        # kwargs kept for any legacy keyword-style callers.
+        opts = options or kwargs
         # tenant isolation: only return matches whose metadata.tenant_id == filter tenant_id
-        tenant_id = (filter or {}).get("tenant_id")
+        tenant_id = (opts.get("filter") or {}).get("tenant_id")
         out = []
         for m in self.matches:
             if tenant_id and m.get("metadata", {}).get("tenant_id") != tenant_id:
                 continue
             out.append(m)
-        return {"matches": out[: topK or len(out)]}
+        return {"matches": out[: opts.get("topK") or len(out)]}
 
     async def upsert(self, points):
         self.upserted = list(points)
         return SimpleNamespace()
+
+    async def deleteByIds(self, ids=None):
+        return await self.delete(ids=ids)
 
     async def delete(self, ids=None):
         self.deleted = list(ids or [])
@@ -403,11 +409,11 @@ def test_triage_read_only_no_production_writes(monkeypatch):
         "metadata": {"document_id": "doc-1", "tenant_id": "t1", "chunk_id": "doc-1-v1-0",
                      "content": "OOMKilled check memory limit after deploy.", "version": 1},
     }]
-    before_writes = len([e for e in env.DB.executed if e[0].strip().upper().startswith(("INSERT", "UPDATE", "DELETE")) and "audit_logs" not in e[0] and "rate_limit_buckets" not in e[0] and "triage_reports" not in e[0] and "triage_metrics" not in e[0]])
+    before_writes = len([e for e in env.DB.executed if e[0].strip().upper().startswith(("INSERT", "UPDATE", "DELETE")) and "audit_logs" not in e[0] and "rate_limit_buckets" not in e[0] and "triage_reports" not in e[0] and "triage_metrics" not in e[0] and "token_usage_log" not in e[0]])
     client.post(f"/api/v1/incidents/{inc_id}/triage",
                 headers={**h, "Idempotency-Key": "triage-ro-2"})
     # triage should not INSERT/UPDATE/DELETE incidents or documents (only audit + rate-limit bookkeeping)
-    writes_after = [e for e in env.DB.executed if e[0].strip().upper().startswith(("INSERT", "UPDATE", "DELETE")) and "audit_logs" not in e[0] and "rate_limit_buckets" not in e[0] and "triage_reports" not in e[0] and "triage_metrics" not in e[0]]
+    writes_after = [e for e in env.DB.executed if e[0].strip().upper().startswith(("INSERT", "UPDATE", "DELETE")) and "audit_logs" not in e[0] and "rate_limit_buckets" not in e[0] and "triage_reports" not in e[0] and "triage_metrics" not in e[0] and "token_usage_log" not in e[0]]
     assert len(writes_after) == before_writes, writes_after
 
 

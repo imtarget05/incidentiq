@@ -1,6 +1,6 @@
 # IncidentIQ QA and Engineering Audit
 
-**Audit date:** 2026-11-09  
+**Audit date:** 2026-11-10
 **Scope:** repository implementation, tests, migrations, CI and deployment controls. No production or preview environment was accessed.
 
 ## Readiness conclusion
@@ -55,19 +55,19 @@ Verification was run with Python 3.11.9 and repeated under Python 3.13 where not
 - `scripts/deploy.sh`: expected disabled exit code 2; guard passed.
 - `python scripts/eval_harness.py`: **30 fake-backed cases completed**; harness output includes recall@5 1.0, MRR proxy 0.5 and other synthetic scores, which must not be interpreted as live system quality.
 - `python scripts/demo.py`: **four demo scenarios passed** against local fakes.
-- `cd mcp && npm audit --json`: **12 findings (2 critical, 8 high, 2 moderate)**; fixes require major test/deploy toolchain upgrades.
+- The previous dependency baseline reported 12 MCP npm advisories. After upgrading the supported test/deploy toolchain, `cd mcp && npm audit`: **0 vulnerabilities**.
+- Local Trivy filesystem scan (`vuln,misconfig,secret`, high/critical): **0 dependency vulnerabilities**; no supported configuration files were discovered in this repository scan. This does not replace hosted CI or deployed-configuration review.
 - SonarQube and Trivy hosted scans: **not run**; require CI service configuration and hosted runner.
 
 The deterministic fake-backed evaluation harness was rerun on Python 3.11 and completed 30 cases, with 20 marked sufficient and 10 insufficient. Its scores (including recall@5 and correctness proxies) are synthetic harness output, not measured live RAG quality, and no performance numbers, coverage percentage, or live service availability is asserted by this audit. `/health` reports configuration presence rather than end-to-end dependency readiness.
 
 ## Remaining risks and prerequisites
 
-1. Coordinate supported major upgrades for the MCP test/deploy dependency tree and rerun `npm audit`, tests, and Wrangler dry-runs.
-2. Configure a SonarQube Server project and CI variables/secrets `SONAR_HOST_URL` and `SONAR_TOKEN`; until then CI deliberately fails closed at the Sonar step.
-3. Configure a separate GitHub `preview` environment with a rotated Cloudflare preview token, account ID, preview D1/Vectorize/queue resources, preview URLs, and a preview API key. Preview workflow has not been exercised.
-4. Revoke and rotate any credentials previously exposed outside this repository; this audit did not read or reuse them.
-5. Run hosted CI and retain raw coverage, SonarQube, Trivy, and Wrangler dry-run artifacts before making stronger readiness claims.
-6. Validate service-level health, alerting, backup/restore, queue replay, and load behavior in the isolated preview environment.
+1. Configure a SonarQube Server project and CI variables/secrets `SONAR_HOST_URL` and `SONAR_TOKEN`; until then CI deliberately fails closed at the Sonar step.
+2. Configure a separate GitHub `preview` environment with a rotated Cloudflare preview token, account ID, preview D1/Vectorize/queue resources, preview URLs, and a preview API key. Preview workflow has not been exercised.
+3. Revoke and rotate any credentials previously exposed outside this repository; this audit did not read or reuse them.
+4. Run hosted CI and retain raw coverage, SonarQube, Trivy, and Wrangler dry-run artifacts before making stronger readiness claims.
+5. Validate service-level health, alerting, backup/restore, queue replay, and load behavior in the isolated preview environment.
 
 ## Production readiness statement
 

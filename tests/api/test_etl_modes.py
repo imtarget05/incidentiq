@@ -27,6 +27,9 @@ class FakeVectorize:
         self.upserted = list(points)
         return SimpleNamespace()
 
+    async def deleteByIds(self, ids=None):
+        return await self.delete(ids=ids)
+
     async def delete(self, ids=None):
         if self.fail_delete:
             raise RuntimeError("vectorize delete unavailable")

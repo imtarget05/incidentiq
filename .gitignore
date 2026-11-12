@@ -5,6 +5,7 @@ __pycache__/
 .env
 .venv/
 .venv
+.venv-workers/
 python_modules/
 
 # Node
@@ -13,6 +14,9 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+coverage/
+.coverage
+coverage.xml
 
 # IDE
 .vscode/

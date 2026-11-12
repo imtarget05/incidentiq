@@ -7,15 +7,16 @@ bounded retries and a dead-letter queue.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 MAX_CHUNK_CHARS = 800
 MAX_CHUNKS_PER_DOCUMENT = 25
 
-def _rows(result: Any) -> List[Any]:
+def _rows(result: Any) -> list[Any]:
     if isinstance(result, dict):
         return list(result.get("results") or [])
     rows = getattr(result, "results", None)
@@ -24,7 +25,7 @@ def _rows(result: Any) -> List[Any]:
     return list(result or [])
 
 
-async def _db_all(stmt: Any) -> List[Any]:
+async def _db_all(stmt: Any) -> list[Any]:
     res = stmt.all()
     if inspect.isawaitable(res):
         res = await res
@@ -34,7 +35,7 @@ async def _db_all(stmt: Any) -> List[Any]:
 MAX_RETRIES = 3
 
 
-def coerce_payload(body: Any) -> Dict[str, Any]:
+def coerce_payload(body: Any) -> dict[str, Any]:
     """Normalize a queue message body (Python dict/str or a JS proxy)."""
     if isinstance(body, dict):
         return body
@@ -49,11 +50,11 @@ def coerce_payload(body: Any) -> Dict[str, Any]:
         return json.loads(str(body))
 
 
-def chunk_text(text: str, max_chars: int = MAX_CHUNK_CHARS) -> List[str]:
+def chunk_text(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
     text = re.sub(r"\s+", " ", text or "").strip()
     if not text:
         return []
-    chunks: List[str] = []
+    chunks: list[str] = []
     while len(text) > max_chars:
         cut = text.rfind(" ", 0, max_chars)
         if cut <= 0:
@@ -65,7 +66,7 @@ def chunk_text(text: str, max_chars: int = MAX_CHUNK_CHARS) -> List[str]:
     return chunks[:MAX_CHUNKS_PER_DOCUMENT]
 
 
-async def embed_texts(env: Any, texts: List[str]) -> List[Optional[List[float]]]:
+async def embed_texts(env: Any, texts: list[str]) -> list[list[float] | None]:
     """Embed a batch of texts via Workers AI. Returns one vector per text."""
     if not texts:
         return []
@@ -74,20 +75,27 @@ async def embed_texts(env: Any, texts: List[str]) -> List[Optional[List[float]]]
             "@cf/qwen/qwen3-embedding-0.6b",
             {"text": texts},
         )
-        vectors = result.get("vectors") if isinstance(result, dict) else None
-        if vectors:
-            return [list(map(float, v)) for v in vectors]
+        raw_vectors = None
+        if isinstance(result, dict):
+            raw_vectors = result.get("vectors") or result.get("data")
+        if raw_vectors:
+            vectors: list[list[float]] = []
+            for item in raw_vectors:
+                if isinstance(item, dict):  # newer schema: {"embedding": [...]}
+                    item = item.get("embedding") or item.get("vector") or item.get("data")
+                vectors.append([float(x) for x in item])
+            return vectors
     except Exception:
         pass
     return [None] * len(texts)
 
 
-async def _delete_vectors_for_document(env: Any, document_id: str, tenant_id: str) -> List[str]:
+async def _delete_vectors_for_document(env: Any, document_id: str, tenant_id: str) -> list[str]:
     """Delete existing vectors before a reindex, propagating failures for retry.
 
     Returns the list of vector ids that were requested for deletion.
     """
-    vector_ids: List[str] = []
+    vector_ids: list[str] = []
     try:
         rows = await _db_all(env.DB.prepare(
             "SELECT vector_id FROM chunks WHERE document_id = ? AND tenant_id = ?"
@@ -99,14 +107,27 @@ async def _delete_vectors_for_document(env: Any, document_id: str, tenant_id: st
         if vid:
             vector_ids.append(vid)
     if vector_ids:
-        await env.VECTORIZE_INDEX.delete(ids=vector_ids)
+        last_exc = None
+        for _attempt in range(3):  # Vectorize API returns transient errors while
+            try:                   # its async mutation backlog is processing.
+                _delete_by = getattr(env.VECTORIZE_INDEX, "deleteByIds", None)
+                if _delete_by is not None:
+                    await _delete_by(vector_ids)
+                else:
+                    await env.VECTORIZE_INDEX.delete(ids=vector_ids)
+                break
+            except Exception as exc:
+                last_exc = exc
+                await asyncio.sleep(2 * (_attempt + 1))
+        else:
+            raise last_exc if last_exc else RuntimeError("vectorize delete failed")
     return vector_ids
 
 
 async def process_document(env: Any, document_id: str, tenant_id: str,
                            content: str, filename: str,
                            version: int = 1, attempt: int = 0,
-                           reindex: bool = False) -> Dict[str, Any]:
+                           reindex: bool = False) -> dict[str, Any]:
     """Process a single document end-to-end.
 
     Returns a status dict: {"status": "ok"|"retry"|"dlq", "chunks": n}.
@@ -142,13 +163,14 @@ async def process_document(env: Any, document_id: str, tenant_id: str,
         }
 
     # Build Vectorize points with versioned ids.
-    points: List[Dict[str, Any]] = []
-    db_rows: List[tuple] = []
+    points: list[dict[str, Any]] = []
+    db_rows: list[tuple] = []
     for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
         point_id = f"{document_id}-v{version}-{i}"
         points.append({
             "id": point_id,
             "values": vector,
+            "namespace": tenant_id,
             "metadata": {
                 "document_id": document_id,
                 "tenant_id": tenant_id,

@@ -7,7 +7,7 @@ IncidentIQ is a backend engineering project for retrieving operational knowledge
 - **Problem:** incident responders need relevant runbook and document context alongside incident details.
 - **Architecture:** FastAPI-compatible Python Worker API, D1 metadata and full-text search, Workers AI embeddings, optional Vectorize, ETL consumer, and a TypeScript MCP-style endpoint.
 - **Retrieval:** lexical search and vector search are combined where configured; the code also includes fallback paths.
-- **Current evidence:** API tests pass 60/60 under Python 3.13; MCP has 15 passing tests and typecheck. CI defines lint/test, Trivy, and SonarQube gates, but no hosted run is attached. MCP `npm audit` reports 12 advisories (2 critical, 8 high, 2 moderate), so dependency security is not clean.
+- **Current evidence:** the PR #2 hosted CI run passes Python tests with coverage, MCP tests and typecheck, dependency audit, Trivy, and the SonarCloud quality gate. The API Worker also starts locally through `pywrangler` and returns 200 from both health endpoints.
 - **Readiness:** production readiness is not established. Evaluation fixtures use fake backends; they do not establish live retrieval quality, latency, or cost.
 
 ## Architecture and request flow
@@ -56,20 +56,20 @@ The TypeScript endpoint exposes tools that call the API. MCP bearer credentials 
 
 The evaluation material reports a small golden set against fake backends. Treat it as a deterministic harness check, not as measured RAG accuracy, production latency, or a security result. The live smoke harness exercises API behavior but does not establish document-grounded answer quality against a representative corpus.
 
-The GitHub Actions workflow runs Python tests with coverage, MCP type-checking/tests, deterministic evaluation/demo, and Wrangler dry runs. Ruff runs a strict selected error set without a fallback that could hide failures. Trivy scans the filesystem for high/critical dependency, secret, and configuration findings. MCP `npm audit` currently reports 12 advisories (2 critical, 8 high, 2 moderate); supported coordinated major upgrades are needed, so dependency security is not clean. SonarQube Server analysis waits for the quality gate and fails when `SONAR_HOST_URL` or `SONAR_TOKEN` is absent. The Sonar project must exist on the configured server. A separate manual preview workflow uses distinct D1, Vectorize and queue resources; it refuses IDs/names that match the production configuration. No hosted CI or preview run is attached.
+The GitHub Actions workflow runs Python tests with coverage, MCP type-checking/tests, deterministic evaluation/demo, Python Worker bundle checks through `pywrangler`, and an MCP Wrangler dry run. Ruff runs a strict selected error set without a fallback that could hide failures. The PR #2 hosted CI run passes the dependency audit, Trivy high/critical scan, and SonarCloud quality gate; those checks do not establish deployed Cloudflare security. Sonar analysis fails when `SONAR_HOST_URL` or `SONAR_TOKEN` is absent. A separate manual preview workflow uses distinct D1, Vectorize and queue resources; it refuses IDs/names that match the production configuration. The production workflow requires environment approval and runs authenticated smoke checks after deployment.
 
 ## Production readiness
 
 | Area | Evidence in this repository | Assessment |
 |---|---|---|
 | API and retrieval | Python API, lexical retrieval, Workers AI and optional Vectorize paths | Implemented, but live relevance and failure recovery are unproven |
-| Data model | Migrations 001–003 define tenant, document, workspace, incident, triage report, and triage metric tables | Triage report persistence is tested; `rag_eval_runs` is schema-only and no live analytics pipeline is established |
+| Data model | Migrations 001–004 define tenant, document, workspace, incident, triage report, triage metric, token usage, and circuit breaker tables | Triage report persistence is tested; `rag_eval_runs` is schema-only and no live analytics pipeline is established |
 | Tenant security | API keys are hashed and workspace roles are checked; MCP validates the API key and binds the tenant before tool calls | End-to-end authorization still needs live multi-tenant testing and an independent security review |
 | Frontend | Lightweight interface calls API functions | Authentication is incomplete in current frontend flows; not evidence of a secure user-facing product |
-| CI/deployment | CI runs Python and MCP checks, Trivy and SonarQube; manual preview workflow uses isolated config | No verified hosted gate or preview run; SonarQube server settings and separate preview resources are not configured here |
+| CI/deployment | Hosted PR checks pass; preview uses isolated config and production requires approval | No verified preview or production deploy run yet |
 | Evaluation | Fake-backed golden cases and live smoke script | No defensible live RAG-quality, performance, reliability or cost figures |
 
-**Conclusion:** production readiness and production deployment have not been established. Before presenting this as a production service, complete live tenant-isolation and ETL failure tests, frontend authentication, representative retrieval evaluation, SonarQube/Trivy hosted gate runs, operational monitoring, and a verified isolated preview rollout.
+**Conclusion:** production readiness and deployment have not been established. Before presenting this as a production service, complete live tenant-isolation and ETL failure tests, frontend authentication, representative retrieval evaluation, operational monitoring, and a verified isolated preview rollout.
 
 ## Local development
 

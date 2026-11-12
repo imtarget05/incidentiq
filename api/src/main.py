@@ -31,15 +31,16 @@ Environment bindings (wrangler.toml):
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
 import re
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 try:  # Provided by the Workers runtime; absent in local pytest runs.
@@ -54,7 +55,7 @@ except ImportError:  # pragma: no cover - local test fallback
 import etl
 
 
-def _rows(result: Any) -> List[Any]:
+def _rows(result: Any) -> list[Any]:
     """Normalize a D1 `.all()` result: the runtime returns {results, success, meta}."""
     if isinstance(result, dict):
         return list(result.get("results") or [])
@@ -64,7 +65,7 @@ def _rows(result: Any) -> List[Any]:
     return list(result or [])
 
 
-async def _db_all(stmt: Any) -> List[Any]:
+async def _db_all(stmt: Any) -> list[Any]:
     res = stmt.all()
     if inspect.isawaitable(res):
         res = await res
@@ -76,7 +77,7 @@ app = FastAPI(title="AI Knowledge Platform", version="1.0.0")
 # Observability: correlation IDs, structured logging, rate limits, quota.
 # ---------------------------------------------------------------------------
 
-_REQUEST_LOG: List[Dict[str, Any]] = []
+_REQUEST_LOG: list[dict[str, Any]] = []
 _MAX_REQUEST_LOG = 5000
 
 
@@ -163,6 +164,7 @@ def env_placeholder_DB(request: Request) -> Any:
 
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
+        _validate_startup_config(self.env)
         return await asgi.fetch(app, request.js_object, self.env)
 
 
@@ -189,7 +191,37 @@ def _env(request: Request) -> Any:
     return env
 
 
-async def _tenant_from_api_key(env: Any, api_key: str) -> Optional[Dict[str, Any]]:
+# ---------------------------------------------------------------------------
+# Startup secret validation (fail fast if required config is absent).
+# ---------------------------------------------------------------------------
+
+_REQUIRED_ENV_VARS = (
+    "DB",
+    "VECTORIZE_INDEX",
+    "ETL_QUEUE",
+    "ETL_DLQ",
+    "ai",
+)
+
+
+def _validate_startup_config(env: Any) -> None:
+    """Raise RuntimeError if required Cloudflare bindings are missing.
+
+    Called from the Worker entry point before serving traffic so that a
+    misconfigured deployment fails fast instead of returning 500s.
+    """
+    missing = []
+    for name in _REQUIRED_ENV_VARS:
+        if getattr(env, name, None) is None:
+            missing.append(name)
+    if missing:
+        raise RuntimeError(
+            f"Missing required Cloudflare bindings: {', '.join(missing)}. "
+            "Check wrangler.toml and terraform outputs."
+        )
+
+
+async def _tenant_from_api_key(env: Any, api_key: str) -> dict[str, Any] | None:
     """Validate an API key and return the tenant row."""
     if not api_key or len(api_key) < 8:
         return None
@@ -214,7 +246,7 @@ async def _tenant_from_api_key(env: Any, api_key: str) -> Optional[Dict[str, Any
 
 
 async def get_tenant(request: Request,
-                     x_api_key: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+                     x_api_key: str | None = Header(default=None)) -> dict[str, Any]:
     """FastAPI dependency: authenticate tenant via X-Api-Key."""
     env = _env(request)
     if env is None:
@@ -229,7 +261,7 @@ async def get_tenant(request: Request,
 
 
 async def _audit(env: Any, tenant_id: str, actor: str, action: str,
-                 resource: str, metadata: Dict[str, Any]) -> None:
+                 resource: str, metadata: dict[str, Any]) -> None:
     try:
         await env.DB.prepare(
             "INSERT INTO audit_logs (id, tenant_id, actor, action, resource, metadata, created_at) "
@@ -240,11 +272,11 @@ async def _audit(env: Any, tenant_id: str, actor: str, action: str,
         pass
 
 
-def _chunk_text(text: str, max_chars: int = 800) -> List[str]:
+def _chunk_text(text: str, max_chars: int = 800) -> list[str]:
     text = re.sub(r"\s+", " ", text or "").strip()
     if not text:
         return []
-    chunks: List[str] = []
+    chunks: list[str] = []
     while len(text) > max_chars:
         cut = text.rfind(" ", 0, min(max_chars + 1, len(text)))
         if cut <= 0:
@@ -256,7 +288,7 @@ def _chunk_text(text: str, max_chars: int = 800) -> List[str]:
     return chunks
 
 
-async def _queue_send(binding: Any, payload: Dict[str, Any]) -> bool:
+async def _queue_send(binding: Any, payload: dict[str, Any]) -> bool:
     """Send an ETL job to the queue, awaiting the binding if it is awaitable."""
     if binding is None:
         return False
@@ -271,7 +303,7 @@ async def _queue_send(binding: Any, payload: Dict[str, Any]) -> bool:
 
 async def _dispatch_etl(env: Any, document_id: str, tenant_id: str,
                         content: str, filename: str,
-                        version: int = 1, reindex: bool = False) -> Dict[str, Any]:
+                        version: int = 1, reindex: bool = False) -> dict[str, Any]:
     """Process a document via ETL.
 
     ETL_MODE=inline (default) runs chunk/embed/upsert in-request so documents
@@ -307,7 +339,7 @@ async def _dispatch_etl(env: Any, document_id: str, tenant_id: str,
     return {"status": "queued" if queued else "failed"}
 
 
-async def _drop_document_vectors(env: Any, document_id: str, tenant_id: str) -> List[str]:
+async def _drop_document_vectors(env: Any, document_id: str, tenant_id: str) -> list[str]:
     """Delete indexed vectors and surface errors before removing D1 source records."""
     chunks = await _db_all(env.DB.prepare(
         "SELECT id, vector_id FROM chunks WHERE document_id = ? AND tenant_id = ?"
@@ -315,7 +347,20 @@ async def _drop_document_vectors(env: Any, document_id: str, tenant_id: str) -> 
     vector_ids = [_row_col(c, "vector_id", 1) for c in (chunks or [])
                   if _row_col(c, "vector_id", 1)]
     if vector_ids:
-        await env.VECTORIZE_INDEX.delete(ids=vector_ids)
+        last_exc: Exception | None = None
+        for _attempt in range(3):  # Vectorize API returns transient errors while
+            try:                   # its async mutation backlog is processing.
+                _delete_by = getattr(env.VECTORIZE_INDEX, "deleteByIds", None)
+                if _delete_by is not None:
+                    await _delete_by(vector_ids)
+                else:
+                    await env.VECTORIZE_INDEX.delete(ids=vector_ids)
+                break
+            except Exception as exc:
+                last_exc = exc
+                await asyncio.sleep(2 * (_attempt + 1))
+        else:
+            raise last_exc if last_exc else RuntimeError("vectorize delete failed")
     return vector_ids
 
 
@@ -328,6 +373,22 @@ def _safe_json(value: Any) -> Any:
         return json.loads(value)
     except Exception:
         return value
+
+
+def _llm_text(llm: Any) -> str:
+    """Extract answer text from a Workers AI chat response.
+
+    Newer models (gpt-oss) return OpenAI-compatible
+    {"choices": [{"message": {"content": ...}}]}; some return {"response": "..."}.
+    """
+    if not isinstance(llm, dict):
+        return str(llm or "")
+    if llm.get("response"):
+        return str(llm["response"])
+    try:
+        return str(llm["choices"][0]["message"]["content"] or "")
+    except (KeyError, IndexError, TypeError):
+        return ""
 
 
 def _row_col(row: Any, name: str, idx: int) -> Any:
@@ -349,7 +410,7 @@ STATUS_TRANSITIONS = {
 }
 
 
-async def _tenant_workspaces(env: Any, tenant_id: str) -> List[Dict[str, Any]]:
+async def _tenant_workspaces(env: Any, tenant_id: str) -> list[dict[str, Any]]:
     """Return workspaces the tenant is a member of, with their role."""
     try:
         rows = await _db_all(env.DB.prepare(
@@ -361,7 +422,7 @@ async def _tenant_workspaces(env: Any, tenant_id: str) -> List[Dict[str, Any]]:
         ).bind(tenant_id))
     except Exception:
         return []
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for r in rows or []:
         out.append({
             "id": _row_col(r, "id", 0),
@@ -373,7 +434,7 @@ async def _tenant_workspaces(env: Any, tenant_id: str) -> List[Dict[str, Any]]:
     return out
 
 
-async def _get_workspace_for_tenant(env: Any, tenant_id: str, workspace_id: str) -> Optional[Dict[str, Any]]:
+async def _get_workspace_for_tenant(env: Any, tenant_id: str, workspace_id: str) -> dict[str, Any] | None:
     for ws in await _tenant_workspaces(env, tenant_id):
         if ws["id"] == workspace_id:
             return ws
@@ -389,7 +450,7 @@ def require_role(min_role: str = "reader"):
 
     async def dep(request: Request,
                   tenant: dict = Depends(get_tenant),
-                  x_workspace_id: Optional[str] = Header(default=None)):
+                  x_workspace_id: str | None = Header(default=None)):
         env = _env(request)
         if env is None:
             raise HTTPException(status_code=500, detail="environment not configured")
@@ -412,7 +473,7 @@ def require_role(min_role: str = "reader"):
     return dep
 
 
-async def get_workspace_ctx(request: Request) -> Dict[str, Any]:
+async def get_workspace_ctx(request: Request) -> dict[str, Any]:
     """Read workspace context previously set by require_role."""
     return {
         "tenant": getattr(request.state, "tenant", None),
@@ -434,11 +495,71 @@ async def health(request: Request):
                          "ts": _now_ms()})
 
 
+@app.get("/health/live")
+async def health_live(request: Request):
+    """Kubernetes/uptime liveness probe — returns 200 if the process is alive."""
+    return JSONResponse({"status": "ok", "service": "ai-knowledge-platform", "ts": _now_ms()})
+
+
+@app.get("/health/ready")
+async def health_ready(request: Request):
+    """Kubernetes/uptime readiness probe — returns 200 only when all bindings are available."""
+    env = _env(request)
+    checks: dict[str, str] = {}
+    overall = "ok"
+
+    # Check D1 database binding.
+    db_ok = False
+    if env is not None:
+        try:
+            db_binding = getattr(env, "DB", None)
+            db_ok = db_binding is not None
+        except Exception:
+            db_ok = False
+    checks["d1"] = "ok" if db_ok else "unavailable"
+
+    # Check Vectorize binding.
+    vec_ok = False
+    if env is not None:
+        try:
+            vec_ok = getattr(env, "VECTORIZE_INDEX", None) is not None
+        except Exception:
+            vec_ok = False
+    checks["vectorize"] = "ok" if vec_ok else "unavailable"
+
+    # Check Workers AI binding.
+    ai_ok = False
+    if env is not None:
+        try:
+            ai_ok = getattr(env, "ai", None) is not None
+        except Exception:
+            ai_ok = False
+    checks["workers_ai"] = "ok" if ai_ok else "unavailable"
+
+    # Check ETL Queue binding.
+    queue_ok = False
+    if env is not None:
+        try:
+            queue_ok = getattr(env, "ETL_QUEUE", None) is not None
+        except Exception:
+            queue_ok = False
+    checks["etl_queue"] = "ok" if queue_ok else "unavailable"
+
+    if not db_ok:
+        overall = "degraded"
+
+    status_code = 200 if overall == "ok" else 503
+    return JSONResponse(
+        {"status": overall, "service": "ai-knowledge-platform", "checks": checks, "ts": _now_ms()},
+        status_code=status_code,
+    )
+
+
 @app.post("/api/v1/documents")
 async def upload_document(request: Request,
                           ctx: dict = Depends(require_role("investigator")),
                           file: UploadFile = File(...),
-                          idempotency_key: Optional[str] = Header(default=None)):
+                          idempotency_key: str | None = Header(default=None)):
     env = _env(request)
     tenant_id = ctx["tenant"]["id"]
 
@@ -499,8 +620,12 @@ async def list_documents(request: Request,
         return _json_error(500, "db_query_failed", str(exc))
     docs = []
     for r in rows:
-        docs.append({"id": r[0], "filename": r[1], "status": r[2],
-                     "uploaded_at": r[3], "processed_at": r[4], "error": r[5]})
+        docs.append({"id": _row_col(r, "id", 0),
+                     "filename": _row_col(r, "filename", 1),
+                     "status": _row_col(r, "status", 2),
+                     "uploaded_at": _row_col(r, "uploaded_at", 3),
+                     "processed_at": _row_col(r, "processed_at", 4),
+                     "error": _row_col(r, "error", 5)})
     return JSONResponse({"documents": docs})
 
 
@@ -613,7 +738,7 @@ async def reindex_document(document_id: str, request: Request,
         return JSONResponse({"error": {"code": "forbidden", "message": "document not in workspace"}}, status_code=403)
     try:
         await _drop_document_vectors(env, document_id, tenant_id)
-    except Exception:
+    except Exception as _e:
         return _json_error(503, "vector_cleanup_failed", "Document index cleanup failed; reindex was not applied")
     try:
         await env.DB.prepare(
@@ -642,10 +767,42 @@ async def list_workspaces(request: Request, ctx: dict = Depends(require_role("re
     return JSONResponse({"workspaces": workspaces})
 
 
+@app.post("/api/v1/workspaces")
+async def create_workspace(request: Request,
+                           tenant: dict = Depends(get_tenant)):
+    env = _env(request)
+    tenant_id = tenant["id"]
+    try:
+        body = await request.json()
+    except Exception:
+        return _json_error(400, "invalid_json", "Request body must be JSON")
+    name = (body or {}).get("name", "").strip()
+    if not name:
+        return _json_error(400, "missing_name", "workspace name is required")
+    if len(name) > 100:
+        return _json_error(400, "name_too_long", "workspace name exceeds 100 characters")
+
+    ws_id = str(uuid.uuid4())
+    now = _now_ms()
+    try:
+        await env.DB.prepare(
+            "INSERT INTO workspaces (id, name, created_at, is_active) VALUES (?, ?, ?, 1)"
+        ).bind(ws_id, name, now).run()
+        await env.DB.prepare(
+            "INSERT INTO workspace_members (id, workspace_id, tenant_id, role, created_at) "
+            "VALUES (?, ?, ?, 'admin', ?)"
+        ).bind(str(uuid.uuid4()), ws_id, tenant_id, now).run()
+        await _audit(env, tenant_id, tenant_id, "workspace.create", ws_id, {"name": name})
+    except Exception as exc:
+        return _json_error(500, "db_insert_failed", str(exc))
+
+    return JSONResponse({"status": "created", "workspace_id": ws_id, "name": name}, status_code=201)
+
+
 @app.post("/api/v1/incidents")
 async def create_incident(request: Request,
                           ctx: dict = Depends(require_role("investigator")),
-                          idempotency_key: Optional[str] = Header(default=None)):
+                          idempotency_key: str | None = Header(default=None)):
     env = _env(request)
     tenant = ctx["tenant"]
     tenant_id = tenant["id"]
@@ -744,7 +901,7 @@ async def get_incident(incident_id: str, request: Request, ctx: dict = Depends(r
 @app.patch("/api/v1/incidents/{incident_id}")
 async def update_incident(incident_id: str, request: Request,
                           ctx: dict = Depends(require_role("investigator")),
-                          if_match: Optional[str] = Header(default=None)):
+                          if_match: str | None = Header(default=None)):
     env = _env(request)
     tenant_id = ctx["tenant"]["id"]
     workspace_id = ctx["workspace_id"]
@@ -891,7 +1048,7 @@ async def get_incident_timeline(incident_id: str, request: Request, ctx: dict = 
 async def metrics_quota(request: Request, ctx: dict = Depends(require_role("reader"))):
     env = _env(request)
     tenant_id = ctx["tenant"]["id"]
-    buckets: List[Dict[str, Any]] = []
+    buckets: list[dict[str, Any]] = []
     try:
         rows = await _db_all(env.DB.prepare(
             "SELECT bucket_key, count, window_start FROM rate_limit_buckets WHERE tenant_id = ?"
@@ -914,15 +1071,27 @@ async def metrics_quota(request: Request, ctx: dict = Depends(require_role("read
 
 
 TRIAGE_SYSTEM_PROMPT = (
-    "You are an incident triage assistant. Answer using ONLY the provided context. "
-    "Always cite sources using [n] where n matches the context item number. "
-    "Distinguish confirmed hypotheses from unconfirmed ones. "
-    "If the answer cannot be determined from the context, say you have insufficient evidence. "
-    "Do NOT suggest any action that modifies production (no restart, no deploy, no config change). "
-    "Only recommend read-only checks. "
-    "Answer in the same language as the question. "
-    "Return a JSON object with keys: summary, hypotheses (list of {text, confirmed}), "
-    "read_only_checks (list of strings)."
+    "You are IncidentIQ, a senior Site Reliability Engineer (SRE) triage assistant specializing in "
+    "production incident triage. Your role is to analyze incidents using ONLY the evidence "
+    "provided in the context — never invent facts or guess.\n\n"
+    "STRICT RULES:\n"
+    "1. Base your analysis exclusively on the provided [n] context items.\n"
+    "2. Cite every factual claim with [n] where n is the context item number.\n"
+    "3. Never recommend actions that modify production: no restarts, deploys, config changes, "
+    "   or database writes. Only suggest READ-ONLY diagnostic commands.\n"
+    "4. Distinguish CONFIRMED hypotheses (directly supported by context) from UNCONFIRMED ones "
+    "   (plausible but not proven by context).\n"
+    "5. If the context is insufficient to form a hypothesis, state: "
+    "   'Insufficient evidence in the knowledge base.'\n"
+    "6. Reply in the same language as the incident title.\n\n"
+    "OUTPUT FORMAT — respond with ONLY valid JSON, no markdown fences:\n"
+    "{\n"
+    "  \"summary\": \"<2-3 sentence executive summary with citations>\",\n"
+    "  \"hypotheses\": [\n"
+    "    {\"text\": \"<hypothesis text with [n] citation>\", \"confirmed\": true|false}\n"
+    "  ],\n"
+    "  \"read_only_checks\": [\"<command1>\", \"<command2>\"]\n"
+    "}\n"
 )
 
 READ_ONLY_CHECKS = {
@@ -935,7 +1104,7 @@ READ_ONLY_CHECKS = {
 }
 
 
-def _read_only_checks(service: str, logs_hint: str) -> List[str]:
+def _read_only_checks(service: str, logs_hint: str) -> list[str]:
     key = None
     text = f"{service} {logs_hint}".lower()
     for k in READ_ONLY_CHECKS:
@@ -957,10 +1126,21 @@ async def _record_triage_metric(env: Any, tenant_id: str, incident_id: str, stat
         pass
 
 
+async def _record_token_usage(env: Any, tenant_id: str, endpoint: str, model: str,
+                              prompt_tokens: int, completion_tokens: int, total_tokens: int) -> None:
+    try:
+        await env.DB.prepare(
+            "INSERT INTO token_usage_log (id, tenant_id, endpoint, model, prompt_tokens, completion_tokens, total_tokens, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).bind(str(uuid.uuid4()), tenant_id, endpoint, model, prompt_tokens, completion_tokens, total_tokens, _now_ms()).run()
+    except Exception:
+        pass
+
+
 async def _store_triage_report(env: Any, incident_id: str, tenant_id: str, status: str,
-                                summary: str, hypotheses: List[Dict[str, Any]],
-                                evidence: List[Dict[str, Any]], similar: List[str],
-                                read_only_checks: List[str], citations: List[Dict[str, Any]]) -> None:
+                                summary: str, hypotheses: list[dict[str, Any]],
+                                evidence: list[dict[str, Any]], similar: list[str],
+                                read_only_checks: list[str], citations: list[dict[str, Any]]) -> None:
     await env.DB.prepare(
         "INSERT INTO triage_reports (id, incident_id, tenant_id, status, summary, hypotheses, "
         "evidence, similar_incidents, read_only_checks, citations, created_at) "
@@ -970,15 +1150,15 @@ async def _store_triage_report(env: Any, incident_id: str, tenant_id: str, statu
            json.dumps(read_only_checks), json.dumps(citations), _now_ms()).run()
 
 
-async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -> list[dict[str, Any]]:
     """Hybrid retrieval: Vectorize semantic + D1 FTS5 keyword, merged and re-ranked.
     Both paths are tenant-isolated. Failures in one path do not fail the other.
     """
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     seen: set = set()
 
     # 1. Vectorize semantic search (tenant-isolated via metadata filter).
-    question_vector: Optional[List[float]] = None
+    question_vector: list[float] | None = None
     try:
         embed = await env.ai.run("@cf/qwen/qwen3-embedding-0.6b", {"text": [query]})
         vectors = embed.get("vectors") or embed.get("data") or []
@@ -987,10 +1167,11 @@ async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -
         question_vector = None
     if question_vector:
         try:
-            raw = await env.VECTORIZE_INDEX.query(
-                vector=question_vector, topK=top_k, returnMetadata=True,
-                filter={"tenant_id": tenant_id},
-            )
+            raw = await env.VECTORIZE_INDEX.query(question_vector, {
+                "topK": top_k, "returnMetadata": "all",
+                "namespace": tenant_id,
+                "filter": {"tenant_id": tenant_id},
+            })
             matches = raw.get("matches", []) if isinstance(raw, dict) else []
             for m in matches:
                 meta = m.get("metadata", {}) or {}
@@ -1040,7 +1221,7 @@ async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -
 
 
 async def _similar_incidents(env: Any, tenant_id: str, incident_id: str,
-                       service: str, limit: int = 5) -> List[str]:
+                       service: str, limit: int = 5) -> list[str]:
     try:
         rows = await _db_all(env.DB.prepare(
             "SELECT id FROM incidents WHERE tenant_id = ? AND service = ? AND id != ? "
@@ -1048,7 +1229,7 @@ async def _similar_incidents(env: Any, tenant_id: str, incident_id: str,
         ).bind(tenant_id, service, incident_id, limit))
     except Exception:
         return []
-    out: List[str] = []
+    out: list[str] = []
     for r in rows or []:
         out.append(r[0] if not isinstance(r, dict) else r.get("id"))
     return out
@@ -1094,9 +1275,9 @@ async def triage_incident(incident_id: str, request: Request,
     # Hybrid retrieval.
     context_chunks = await _hybrid_search(env, tenant_id, query)
 
-    citations: List[Dict[str, Any]] = []
-    context_parts: List[str] = []
-    evidence: List[Dict[str, Any]] = []
+    citations: list[dict[str, Any]] = []
+    context_parts: list[str] = []
+    evidence: list[dict[str, Any]] = []
     for idx, ch in enumerate(context_chunks, start=1):
         context_parts.append(f"[{idx}] {ch['content']}")
         citations.append({
@@ -1145,6 +1326,7 @@ async def triage_incident(incident_id: str, request: Request,
     # LLM answer (with graceful degradation -> abstention if AI unavailable).
     answer_text = ""
     tokens_used = 0
+    ai_available = True
     try:
         llm = await env.ai.run("@cf/openai/gpt-oss-20b", {
             "messages": [
@@ -1153,24 +1335,47 @@ async def triage_incident(incident_id: str, request: Request,
             ],
             "max_tokens": 512,
         })
-        answer_text = llm.get("response", "") if isinstance(llm, dict) else str(llm)
+        answer_text = _llm_text(llm)
         usage = llm.get("usage", {}) if isinstance(llm, dict) else {}
         tokens_used = usage.get("total_tokens", 0)
     except Exception:
         answer_text = ""
+        ai_available = False
 
-    # Parse hypotheses from LLM answer; fallback to a single unconfirmed hypothesis.
-    hypotheses: List[Dict[str, Any]] = []
-    summary = answer_text.strip() or "Có bằng chứng nhưng không thể tổng hợp tự động."
-    for line in answer_text.splitlines():
-        line = line.strip()
-        if line.lower().startswith("hypothesis:"):
-            hyp_text = line.split(":", 1)[1].strip()
-            confirmed = "confirmed" in hyp_text.lower() or "yes" in hyp_text.lower()
-            hypotheses.append({"text": hyp_text, "confirmed": bool(confirmed)})
+    # Parse structured JSON from LLM; fall back gracefully.
+    hypotheses: list[dict[str, Any]] = []
+    summary = "Có bằng chứng nhưng không thể tổng hợp tự động."
+    if answer_text.strip():
+        raw = answer_text.strip()
+        if raw.startswith("```"):
+            raw = raw.lstrip("`").split("```")[0].strip()
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+        try:
+            parsed = json.loads(raw)
+            summary = parsed.get("summary", summary) or summary
+            for h in parsed.get("hypotheses", []):
+                if isinstance(h, dict) and "text" in h:
+                    hypotheses.append({
+                        "text": str(h["text"]),
+                        "confirmed": bool(h.get("confirmed", False)),
+                    })
+        except Exception:
+            summary = answer_text.strip()
+            for line in answer_text.splitlines():
+                line = line.strip()
+                if line.lower().startswith("hypothesis:"):
+                    hyp_text = line.split(":", 1)[1].strip()
+                    confirmed = "confirmed" in hyp_text.lower() or "yes" in hyp_text.lower()
+                    hypotheses.append({"text": hyp_text, "confirmed": bool(confirmed)})
     if not hypotheses:
         hypotheses = [{"text": summary, "confirmed": False}]
-
+    if not ai_available:
+        summary = (
+            f"Workers AI is currently unavailable. {len(context_chunks)} evidence item(s) were "
+            f"retrieved from the knowledge base. Manual review recommended."
+        )
+        hypotheses = [{"text": "AI inference unavailable — review evidence items manually.", "confirmed": False}]
     similar = await _similar_incidents(env, tenant_id, incident_id, service)
     try:
         await _store_triage_report(env, incident_id, tenant_id, "ok", summary, hypotheses,
@@ -1180,6 +1385,7 @@ async def triage_incident(incident_id: str, request: Request,
                    incident_id=incident_id, error=type(exc).__name__)
         return _json_error(503, "report_persist_failed", "Triage report could not be persisted")
     await _record_triage_metric(env, tenant_id, incident_id, "ok", len(citations), tokens_used, 0)
+    await _record_token_usage(env, tenant_id, "triage", "@cf/openai/gpt-oss-20b", 0, 0, tokens_used)
     await _audit(env, tenant_id, tenant_id, "incident.triage", incident_id,
                  {"status": "ok", "tokens": tokens_used, "citations": [c["id"] for c in citations]})
 
@@ -1228,7 +1434,7 @@ async def get_incident_report(incident_id: str, request: Request,
 @app.post("/api/v1/question")
 async def ask_question(request: Request,
                        tenant: dict = Depends(get_tenant),
-                       idempotency_key: Optional[str] = Header(default=None)):
+                       idempotency_key: str | None = Header(default=None)):
     env = _env(request)
     tenant_id = tenant["id"]
 
@@ -1257,24 +1463,24 @@ async def ask_question(request: Request,
         return JSONResponse({"status": "duplicate"}, status_code=202)
 
     # 1. Embed the question.
-    question_vector: Optional[List[float]] = None
+    question_vector: list[float] | None = None
     try:
         embed = await env.ai.run("@cf/qwen/qwen3-embedding-0.6b", {"text": [question]})
         vectors = embed.get("vectors") or embed.get("data") or []
         question_vector = vectors[0] if vectors else None
-    except Exception:
+    except Exception as _e:
         question_vector = None
 
     # 2. Vector search (tenant-isolated via metadata filter).
-    context_chunks: List[Dict[str, Any]] = []
+    context_chunks: list[dict[str, Any]] = []
     if question_vector:
         try:
-            results = await env.VECTORIZE_INDEX.query(
-                vector=question_vector,
-                topK=5,
-                returnMetadata=True,
-                filter={"tenant_id": tenant_id},
-            )
+            results = await env.VECTORIZE_INDEX.query(question_vector, {
+                "topK": 5,
+                "returnMetadata": "all",
+                "namespace": tenant_id,
+                "filter": {"tenant_id": tenant_id},
+            })
             matches = results.get("matches", []) if isinstance(results, dict) else []
             for m in matches:
                 meta = m.get("metadata", {}) or {}
@@ -1285,12 +1491,12 @@ async def ask_question(request: Request,
                     "content": meta.get("content", ""),
                     "score": m.get("score", 0),
                 })
-        except Exception:
+        except Exception as _e:
             context_chunks = []
 
     # 3. Build cited context.
-    context_parts: List[str] = []
-    citations: List[Dict[str, Any]] = []
+    context_parts: list[str] = []
+    citations: list[dict[str, Any]] = []
     for idx, ch in enumerate(context_chunks, start=1):
         context_parts.append(f"[{idx}] {ch['content']}")
         citations.append({"id": idx, "document_id": ch["document_id"],
@@ -1317,12 +1523,13 @@ async def ask_question(request: Request,
             ],
             "max_tokens": 512,
         })
-        answer = llm.get("response", "") if isinstance(llm, dict) else str(llm)
+        answer = _llm_text(llm)
         usage = llm.get("usage", {}) if isinstance(llm, dict) else {}
         tokens_used = usage.get("total_tokens", 0)
     except Exception:
         answer = "Xin loi, toi hien khong the tao cau tra loi. Vui long thu lai sau."
 
+    await _record_token_usage(env, tenant_id, "question", "@cf/openai/gpt-oss-20b", 0, 0, tokens_used)
     await _audit(env, tenant_id, tenant_id, "question", question,
                  {"idempotency_key": idempotency_key, "tokens": tokens_used,
                   "citations": [c["id"] for c in citations]})
@@ -1333,3 +1540,13 @@ async def ask_question(request: Request,
         "tokens_used": tokens_used,
         "ts": _now_ms(),
     })
+
+
+# ---------------------------------------------------------------------------
+# API v2 — load versioned router.
+# ---------------------------------------------------------------------------
+try:
+    from v2 import _v2
+    app.include_router(_v2)
+except ImportError:
+    pass  # v2 module not available in test harness — skip gracefully.

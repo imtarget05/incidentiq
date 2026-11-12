@@ -3,74 +3,130 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Knowledge Platform</title>
+<title>IncidentIQ — AI Knowledge Platform</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="bar">
-  <div class="brand">AI Knowledge Platform</div>
+  <div class="brand">IncidentIQ</div>
+  <nav class="nav-tabs" role="navigation" aria-label="Main navigation">
+    <button class="tab-btn active" data-tab="main" aria-selected="true">Trang chính</button>
+    <button class="tab-btn" data-tab="health" aria-selected="false">Health Dashboard</button>
+  </nav>
   <div class="auth">
-    <label>Tenant API Key</label>
-    <input type="password" id="apiKeyInput" placeholder="sk-…">
-    <button id="btnSaveKey">Lưu</button>
-    <span id="apiKeyStatus" class="hint">Chưa có API key</span>
-    <div id="apiKeyMsg" class="msg"></div>
+    <label for="apiKeyInput" class="sr-only">Tenant API Key</label>
+    <div class="api-key-wrap">
+      <input type="password" id="apiKeyInput" placeholder="sk-… (Tenant API Key)" autocomplete="off" aria-label="Tenant API Key">
+      <button id="btnSaveKey" type="button">Lưu key</button>
+      <button id="btnClearKey" type="button" class="btn-secondary" title="Xóa API key">✕</button>
+    </div>
+    <span id="apiKeyStatus" class="hint" role="status" aria-live="polite">Chưa có API key</span>
   </div>
-  <div class="status" id="status">─</div>
 </header>
 
-<main class="wrap">
-  <section class="panel">
+<!-- Main tab -->
+<main class="wrap" id="tab-main" role="main">
+  <section class="panel" aria-label="Tải tài liệu">
     <h2>Tải tài liệu lên</h2>
     <div class="form-row">
-      <input type="file" id="fileInput" accept=".txt,.md">
-      <button id="btnUpload">Tải lên</button>
+      <input type="file" id="fileInput" accept=".txt,.md" aria-label="Chọn file tài liệu">
+      <button id="btnUpload" type="button">
+        <span class="btn-label">Tải lên</span>
+        <span class="spinner" hidden aria-hidden="true">⏳</span>
+      </button>
     </div>
-    <div id="uploadMsg" class="msg"></div>
+    <div id="uploadMsg" class="msg" role="status" aria-live="polite"></div>
   </section>
 
-  <section class="panel">
+  <section class="panel" aria-label="Đặt câu hỏi">
     <h2>Đặt câu hỏi</h2>
     <div class="form-row">
-      <input type="text" id="questionInput" placeholder="Nhập câu hỏi...">
-      <button id="btnAsk">Gởi</button>
+      <input type="text" id="questionInput" placeholder="Nhập câu hỏi..." aria-label="Câu hỏi">
+      <button id="btnAsk" type="button">
+        <span class="btn-label">Gởi</span>
+        <span class="spinner" hidden aria-hidden="true">⏳</span>
+      </button>
     </div>
-    <div id="answer" class="answer"></div>
+    <div id="answerLoading" class="loading-state" hidden aria-live="polite">
+      <div class="skeleton-line"></div>
+      <div class="skeleton-line short"></div>
+    </div>
+    <div id="answer" class="answer" role="region" aria-label="Câu trả lời" aria-live="polite"></div>
     <div id="citations" class="citations"></div>
+    <div id="answerError" class="msg err" role="alert" aria-live="assertive" hidden></div>
+    <button id="btnRetryAsk" type="button" class="btn-retry" hidden>🔄 Thử lại</button>
   </section>
 
-  <section class="panel">
+  <section class="panel" aria-label="Tạo sự cố">
     <h2>Tạo sự cố (incident)</h2>
     <div class="form-row">
-      <input type="text" id="incTitle" placeholder="Tiêu đề sự cố">
-      <input type="text" id="incSeverity" placeholder="Severity (CRITICAL/HIGH/MEDIUM/LOW)">
+      <input type="text" id="incTitle" placeholder="Tiêu đề sự cố" aria-label="Tiêu đề">
+      <select id="incSeverity" aria-label="Mức độ nghiêm trọng">
+        <option value="">Chọn severity…</option>
+        <option value="CRITICAL">CRITICAL</option>
+        <option value="HIGH">HIGH</option>
+        <option value="MEDIUM">MEDIUM</option>
+        <option value="LOW">LOW</option>
+      </select>
     </div>
     <div class="form-row">
-      <input type="text" id="incService" placeholder="Dịch vụ (payment-api)">
-      <input type="text" id="incEnv" placeholder="Môi trường (prod)">
+      <input type="text" id="incService" placeholder="Dịch vụ (payment-api)" aria-label="Dịch vụ">
+      <input type="text" id="incEnv" placeholder="Môi trường (prod)" aria-label="Môi trường">
     </div>
     <div class="form-row">
-      <input type="text" id="incIdem" placeholder="Idempotency-Key (vd: inc-001)">
-      <button id="btnCreateInc">Tạo sự cố</button>
+      <input type="text" id="incIdem" placeholder="Idempotency-Key (vd: inc-001)" aria-label="Idempotency Key">
+      <button id="btnCreateInc" type="button">
+        <span class="btn-label">Tạo sự cố</span>
+        <span class="spinner" hidden aria-hidden="true">⏳</span>
+      </button>
     </div>
-    <div id="incMsg" class="msg"></div>
-    <div id="incResult" class="msg"></div>
+    <div id="incMsg" class="msg" role="status" aria-live="polite"></div>
+    <div id="incResult" class="msg" role="status" aria-live="polite"></div>
   </section>
 
-  <section class="panel">
+  <section class="panel" aria-label="Chi tiết sự cố">
     <h2>Chi tiết &amp; timeline sự cố</h2>
     <div class="form-row">
-      <input type="text" id="incLookupId" placeholder="ID sự cố">
-      <button id="btnLookupInc">Xem</button>
+      <input type="text" id="incLookupId" placeholder="ID sự cố" aria-label="ID sự cố">
+      <button id="btnLookupInc" type="button">Xem</button>
     </div>
-    <div id="incDetail"></div>
-    <ul id="incTimeline"></ul>
+    <div id="incDetail" aria-live="polite"></div>
+    <ul id="incTimeline" aria-label="Timeline sự cố"></ul>
+    <div id="incLookupError" class="msg err" role="alert" hidden></div>
+    <button id="btnRetryLookup" type="button" class="btn-retry" hidden>🔄 Thử lại</button>
   </section>
 
-  <section class="panel">
+  <section class="panel" aria-label="Danh sách tài liệu">
     <h2>Tài liệu của bạn</h2>
-    <button id="btnList">Làm mới danh sách</button>
-    <ul id="docList"></ul>
+    <button id="btnList" type="button">Làm mới</button>
+    <div id="docListLoading" class="loading-state" hidden>
+      <div class="skeleton-line"></div>
+      <div class="skeleton-line short"></div>
+    </div>
+    <ul id="docList" aria-live="polite"></ul>
+  </section>
+</main>
+
+<!-- Health dashboard tab -->
+<main class="wrap" id="tab-health" role="main" hidden>
+  <section class="panel" aria-label="Health Dashboard">
+    <div class="health-header">
+      <h2>Health Dashboard</h2>
+      <button id="btnRefreshHealth" type="button" class="btn-secondary">🔄 Làm mới</button>
+    </div>
+    <div id="healthLoading" class="loading-state" hidden>
+      <div class="skeleton-line"></div>
+      <div class="skeleton-line short"></div>
+    </div>
+    <div id="healthDashboard" class="health-grid" aria-live="polite"></div>
+  </section>
+
+  <section class="panel" aria-label="AI Quota">
+    <h2>AI Quota</h2>
+    <div id="quotaLoading" class="loading-state" hidden>
+      <div class="skeleton-line"></div>
+    </div>
+    <div id="quotaDashboard" aria-live="polite"></div>
   </section>
 </main>
 

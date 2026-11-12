@@ -1,0 +1,852 @@
+[
+  {
+    "id": "gc-01",
+    "incident": {
+      "title": "OOMKilled payment-api",
+      "severity": "CRITICAL",
+      "service": "payment-api",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-01",
+        "content": "OOMKilled exit code 137: check memory limit and usage after deploy.",
+        "tenant_id": "t1",
+        "filename": "gc-01.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-01",
+        "uploaded_at": 1794408502513,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-01",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-01",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-01-v1-0",
+          "content": "OOMKilled exit code 137: check memory limit and usage after deploy.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Container exceeded memory limit"
+  },
+  {
+    "id": "gc-02",
+    "incident": {
+      "title": "CrashLoopBackOff payment-api",
+      "severity": "HIGH",
+      "service": "payment-api",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-02",
+        "content": "CrashLoopBackOff: container repeatedly crashes. Check previous logs.",
+        "tenant_id": "t1",
+        "filename": "gc-02.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-02",
+        "uploaded_at": 1794408502514,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-02",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-02",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-02-v1-0",
+          "content": "CrashLoopBackOff: container repeatedly crashes. Check previous logs.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Application crash"
+  },
+  {
+    "id": "gc-03",
+    "incident": {
+      "title": "ImagePullBackOff registry",
+      "severity": "CRITICAL",
+      "service": "image-registry",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-03",
+        "content": "ImagePullBackOff: unable to pull image. Verify image name and registry credentials.",
+        "tenant_id": "t1",
+        "filename": "gc-03.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-03",
+        "uploaded_at": 1794408502515,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-03",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-03",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-03-v1-0",
+          "content": "ImagePullBackOff: unable to pull image. Verify image name and registry credentials.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Image pull failure"
+  },
+  {
+    "id": "gc-04",
+    "incident": {
+      "title": "Readiness probe failure",
+      "severity": "HIGH",
+      "service": "web-frontend",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-04",
+        "content": "Readiness probe failing. Check application health endpoint and dependencies.",
+        "tenant_id": "t1",
+        "filename": "gc-04.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-04",
+        "uploaded_at": 1794408502516,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-04",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-04",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-04-v1-0",
+          "content": "Readiness probe failing. Check application health endpoint and dependencies.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Readiness probe failure"
+  },
+  {
+    "id": "gc-05",
+    "incident": {
+      "title": "Database connection timeout",
+      "severity": "CRITICAL",
+      "service": "orders-db",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-05",
+        "content": "Database connection timeout. Check database service and network policies.",
+        "tenant_id": "t1",
+        "filename": "gc-05.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-05",
+        "uploaded_at": 1794408502517,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-05",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-05",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-05-v1-0",
+          "content": "Database connection timeout. Check database service and network policies.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Database timeout"
+  },
+  {
+    "id": "gc-06",
+    "incident": {
+      "title": "Queue backlog",
+      "severity": "HIGH",
+      "service": "notification-queue",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-06",
+        "content": "Queue backlog growing. Check consumer lag and scaling.",
+        "tenant_id": "t1",
+        "filename": "gc-06.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-06",
+        "uploaded_at": 1794408502518,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-06",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-06",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-06-v1-0",
+          "content": "Queue backlog growing. Check consumer lag and scaling.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Queue backlog"
+  },
+  {
+    "id": "gc-07",
+    "incident": {
+      "title": "OOMKilled payments-worker",
+      "severity": "CRITICAL",
+      "service": "payments-worker",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-07",
+        "content": "OOMKilled exit code 137. Increase container memory limit.",
+        "tenant_id": "t1",
+        "filename": "gc-07.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-07",
+        "uploaded_at": 1794408502519,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-07",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-07",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-07-v1-0",
+          "content": "OOMKilled exit code 137. Increase container memory limit.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Memory limit exceeded"
+  },
+  {
+    "id": "gc-08",
+    "incident": {
+      "title": "CrashLoopBackOff auth-api",
+      "severity": "HIGH",
+      "service": "auth-api",
+      "environment": "staging"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-08",
+        "content": "CrashLoopBackOff after deploy. Rollback or check previous logs.",
+        "tenant_id": "t1",
+        "filename": "gc-08.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-08",
+        "uploaded_at": 1794408502520,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-08",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-08",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-08-v1-0",
+          "content": "CrashLoopBackOff after deploy. Rollback or check previous logs.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Post-deploy crash"
+  },
+  {
+    "id": "gc-09",
+    "incident": {
+      "title": "ImagePullBackOff private",
+      "severity": "MEDIUM",
+      "service": "private-registry",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-09",
+        "content": "ImagePullBackOff: secret missing. Verify imagePullSecrets.",
+        "tenant_id": "t1",
+        "filename": "gc-09.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-09",
+        "uploaded_at": 1794408502521,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-09",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-09",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-09-v1-0",
+          "content": "ImagePullBackOff: secret missing. Verify imagePullSecrets.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Image pull secret missing"
+  },
+  {
+    "id": "gc-10",
+    "incident": {
+      "title": "Readiness probe failure api-gw",
+      "severity": "HIGH",
+      "service": "api-gateway",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-10",
+        "content": "Readiness probe failing. Check backend services.",
+        "tenant_id": "t1",
+        "filename": "gc-10.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-10",
+        "uploaded_at": 1794408502522,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-10",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-10",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-10-v1-0",
+          "content": "Readiness probe failing. Check backend services.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Readiness failure"
+  },
+  {
+    "id": "gc-11",
+    "incident": {
+      "title": "Database connection timeout users-db",
+      "severity": "CRITICAL",
+      "service": "users-db",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-11",
+        "content": "Database connection timeout. Connection pool exhausted.",
+        "tenant_id": "t1",
+        "filename": "gc-11.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-11",
+        "uploaded_at": 1794408502523,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-11",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-11",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-11-v1-0",
+          "content": "Database connection timeout. Connection pool exhausted.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "DB timeout"
+  },
+  {
+    "id": "gc-12",
+    "incident": {
+      "title": "Queue backlog email",
+      "severity": "MEDIUM",
+      "service": "email-queue",
+      "environment": "staging"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-12",
+        "content": "Queue backlog. Consumer down.",
+        "tenant_id": "t1",
+        "filename": "gc-12.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-12",
+        "uploaded_at": 1794408502524,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-12",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-12",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-12-v1-0",
+          "content": "Queue backlog. Consumer down.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Queue backlog"
+  },
+  {
+    "id": "gc-13",
+    "incident": {
+      "title": "OOMKilled cache",
+      "severity": "HIGH",
+      "service": "cache-layer",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-13",
+        "content": "OOMKilled. Memory limit too low.",
+        "tenant_id": "t1",
+        "filename": "gc-13.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-13",
+        "uploaded_at": 1794408502525,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-13",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-13",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-13-v1-0",
+          "content": "OOMKilled. Memory limit too low.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Memory limit too low"
+  },
+  {
+    "id": "gc-14",
+    "incident": {
+      "title": "CrashLoopBackOff scheduler",
+      "severity": "MEDIUM",
+      "service": "scheduler",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-14",
+        "content": "CrashLoopBackOff. Config error.",
+        "tenant_id": "t1",
+        "filename": "gc-14.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-14",
+        "uploaded_at": 1794408502526,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-14",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-14",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-14-v1-0",
+          "content": "CrashLoopBackOff. Config error.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Config error"
+  },
+  {
+    "id": "gc-15",
+    "incident": {
+      "title": "ImagePullBackOff pause",
+      "severity": "LOW",
+      "service": "pause-image",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-15",
+        "content": "ImagePullBackOff. Registry rate limited.",
+        "tenant_id": "t1",
+        "filename": "gc-15.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-15",
+        "uploaded_at": 1794408502527,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-15",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-15",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-15-v1-0",
+          "content": "ImagePullBackOff. Registry rate limited.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Registry rate limited"
+  },
+  {
+    "id": "gc-16",
+    "incident": {
+      "title": "Readiness probe failure worker",
+      "severity": "LOW",
+      "service": "batch-worker",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-16",
+        "content": "Readiness probe failing. Worker not healthy.",
+        "tenant_id": "t1",
+        "filename": "gc-16.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-16",
+        "uploaded_at": 1794408502528,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-16",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-16",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-16-v1-0",
+          "content": "Readiness probe failing. Worker not healthy.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Worker unhealthy"
+  },
+  {
+    "id": "gc-17",
+    "incident": {
+      "title": "Database connection timeout cache-db",
+      "severity": "MEDIUM",
+      "service": "cache-db",
+      "environment": "staging"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-17",
+        "content": "Database connection timeout. DNS failure.",
+        "tenant_id": "t1",
+        "filename": "gc-17.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-17",
+        "uploaded_at": 1794408502529,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-17",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-17",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-17-v1-0",
+          "content": "Database connection timeout. DNS failure.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "DB timeout"
+  },
+  {
+    "id": "gc-18",
+    "incident": {
+      "title": "Queue backlog events",
+      "severity": "HIGH",
+      "service": "events-queue",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-18",
+        "content": "Queue backlog. Throughput low.",
+        "tenant_id": "t1",
+        "filename": "gc-18.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-18",
+        "uploaded_at": 1794408502530,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-18",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-18",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-18-v1-0",
+          "content": "Queue backlog. Throughput low.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Queue backlog"
+  },
+  {
+    "id": "gc-19",
+    "incident": {
+      "title": "OOMKilled ml-service",
+      "severity": "CRITICAL",
+      "service": "ml-service",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-19",
+        "content": "OOMKilled exit 137. Model too large for container.",
+        "tenant_id": "t1",
+        "filename": "gc-19.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-19",
+        "uploaded_at": 1794408502531,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-19",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-19",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-19-v1-0",
+          "content": "OOMKilled exit 137. Model too large for container.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Model too large"
+  },
+  {
+    "id": "gc-20",
+    "incident": {
+      "title": "CrashLoopBackOff webhook",
+      "severity": "HIGH",
+      "service": "webhook-svc",
+      "environment": "prod"
+    },
+    "docs": [
+      {
+        "id": "doc-gc-20",
+        "content": "CrashLoopBackOff. Signature verification failing.",
+        "tenant_id": "t1",
+        "filename": "gc-20.md",
+        "status": "processed",
+        "idempotency_key": "dk-gc-20",
+        "uploaded_at": 1794408502532,
+        "version": 1
+      }
+    ],
+    "matches": [
+      {
+        "id": "vec-gc-20",
+        "score": 0.9,
+        "metadata": {
+          "document_id": "doc-gc-20",
+          "tenant_id": "t1",
+          "chunk_id": "doc-gc-20-v1-0",
+          "content": "CrashLoopBackOff. Signature verification failing.",
+          "version": 1
+        }
+      }
+    ],
+    "expected_status": "ok",
+    "expected_hypothesis_contains": "Signature verification failing"
+  },
+  {
+    "id": "gc-21",
+    "incident": {
+      "title": "Unknown kernel panic",
+      "severity": "CRITICAL",
+      "service": "mystery-svc",
+      "environment": "prod"
+    },
+    "docs": [],
+    "matches": [],
+    "expected_status": "insufficient_evidence",
+    "expected_hypothesis_contains": null
+  },
+  {
+    "id": "gc-22",
+    "incident": {
+      "title": "Undefined error xyz",
+      "severity": "HIGH",
+      "service": "unknown-svc",
+      "environment": "prod"
+    },
+    "docs": [],
+    "matches": [],
+    "expected_status": "insufficient_evidence",
+    "expected_hypothesis_contains": null
+  },
+  {
+    "id": "gc-23",
+    "incident": {
+      "title": "New symptom abc",
+      "severity": "MEDIUM",
+      "service": "new-svc",
+      "environment": "prod"
+    },
+    "docs": [],
+    "matches": [],
+    "expected_status": "insufficient_evidence",
+    "expected_hypothesis_contains": null
+  },
+  {
+    "id": "gc-24",
+    "incident": {
+      "title": "Unseen alert qrs",
+      "severity": "LOW",
+      "service": "new-svc",
+      "environment": "prod"
+    },
+    "docs": [],
+    "matches": [],
+    "expected_status": "insufficient_evidence",
+    "expected_hypothesis_contains": null
+  },
+  {
+    "id": "gc-25",
+    "incident": {
+      "title": "Odd behavior 123",
+      "severity": "HIGH",
+      "service": "odd-svc",
+      "environment": "prod"
+    },
+    "docs": [],
+    "matches": [],
+    "expected_status": "insufficient_evidence",
+    "expected_hypothesis_contains": null
+  },
+  {
+    "id": "gc-26",
+    "incident": {
+      "title": "Strange crash 456",
+      "severity": "CRITICAL",
+      "service": "odd-svc",
+      "environment": "prod"
+    },
+    "docs": [],
+    "matches": [],
+    "expected_status": "insufficient_evidence",
+    "expected_hypothesis_contains": null
+  },
+  {
+    "id": "gc-27",
+    "incident": {
+      "title": "Random failure 789",
+      "severity": "LOW",
+      "service": "odd-svc",
+      "environment": "prod"
+    },
+    "docs": [],
+    "matches": [],
+    "expected_status": "insufficient_evidence",
+    "expected_hypothesis_contains": null
+  },
+  {
+    "id": "gc-28",
+    "incident": {
+      "title": "Weird timeout",
+      "severity": "MEDIUM",
+      "service": "odd-svc",
+      "environment": "prod"
+    },
+    "docs": [],
+    "matches": [],
+    "expected_status": "insufficient_evidence",
+    "expected_hypothesis_contains": null
+  },
+  {
+    "id": "gc-29",
+    "incident": {
+      "title": "Panic mode",
+      "severity": "CRITICAL",
+      "service": "odd-svc",
+      "environment": "prod"
+    },
+    "docs": [],
+    "matches": [],
+    "expected_status": "insufficient_evidence",
+    "expected_hypothesis_contains": null
+  },
+  {
+    "id": "gc-30",
+    "incident": {
+      "title": "Glitch detected",
+      "severity": "HIGH",
+      "service": "odd-svc",
+      "environment": "prod"
+    },
+    "docs": [],
+    "matches": [],
+    "expected_status": "insufficient_evidence",
+    "expected_hypothesis_contains": null
+  }
+]

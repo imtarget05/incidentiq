@@ -1,6 +1,6 @@
-# IncidentIQ — Preview Operations Runbook
+# IncidentIQ — Deployment Runbook
 
-This repository currently supports a manually triggered Cloudflare **preview** workflow. It does not authorize or configure a production rollout.
+The repository defines isolated preview and gated production workflows. A green CI run validates the source and Worker bundles; only a successful deploy workflow and live smoke test establish a deployment.
 
 ## Preview prerequisites
 
@@ -35,8 +35,12 @@ The script creates a low-severity test incident in the supplied environment. Use
 - A failed SonarQube quality gate or Trivy scan blocks CI. No deploy should be triggered until CI is green.
 - `report_persist_failed` means triage output could not be durably recorded; retry after D1 is healthy and verify `GET /api/v1/incidents/{id}/report`.
 - ETL retry/DLQ records should be checked before manually reprocessing. Reindexing is tenant- and workspace-protected.
-- Roll back preview by deploying the last known-good artifact to the preview Worker. Do not run migration rollback against a shared or production database without a separately reviewed recovery procedure.
+- Roll back a Worker by redeploying the last known-good commit. Do not roll back a shared or production D1 migration without a reviewed recovery procedure.
 
-## Production status
+## Production release
 
-Production resources, monitoring, alert thresholds, retention, restore procedures, and a verified production rollback are not established by this repository snapshot. Do not use the base Wrangler configs or `scripts/deploy.sh` for a production release.
+The GitHub `production` environment admits only `main` and requires reviewer approval. Set `CLOUDFLARE_ACCOUNT_ID`, `PROD_API_WORKER_URL`, and `PROD_MCP_WORKER_URL` as repository variables. Store a scoped `CLOUDFLARE_PROD_API_TOKEN` and an active tenant key `PROD_SMOKE_API_KEY` as production environment secrets. The smoke key must match an active `api_keys` record in the production D1 database; do not use a Cloudflare token as this key.
+
+After CI passes and the production environment is configured, merge the reviewed PR into `main`, approve **Deploy IncidentIQ production**, and inspect the run. The workflow applies pending D1 migrations, deploys the Python API and ETL Workers with `pywrangler`, deploys the MCP Worker with Wrangler, then checks authenticated API behavior, MCP `tools/list`, and `/health/live` and `/health/ready`. Download the `incidentiq-deploy-evidence` artifact and check the live Worker URLs before declaring the release complete.
+
+If a migration or deploy step fails, inspect the failed job and Cloudflare Worker logs before retrying. The workflow is serialized with `cancel-in-progress: false` so another push cannot interrupt a production release. A successful deployment does not by itself prove live retrieval quality, tenant isolation, alerting, retention, restore, or rollback behavior; verify those separately before relying on the service for incidents.

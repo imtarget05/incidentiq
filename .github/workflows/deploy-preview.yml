@@ -16,7 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: preview
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_API_TOKEN }}
+      # Prefer the scoped preview token; fall back to the existing account token.
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PREVIEW_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       PREVIEW_D1_DATABASE_ID: ${{ vars.PREVIEW_D1_DATABASE_ID }}
       PREVIEW_VECTORIZE_INDEX: ${{ vars.PREVIEW_VECTORIZE_INDEX }}
@@ -30,10 +31,17 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.7"
+
+      - name: Install root Wrangler for Python Worker packaging
+        run: npm ci --ignore-scripts
 
       - name: Install pinned Wrangler from MCP lockfile
-        run: npm ci
+        run: npm ci --ignore-scripts
         working-directory: mcp
 
       - name: Require isolated preview resources and render preview configs
@@ -91,8 +99,8 @@ jobs:
       - name: Validate only preview Worker configurations
         run: |
           export PATH="$PWD/mcp/node_modules/.bin:$PATH"
-          wrangler deploy --dry-run --config wrangler.preview.toml --outdir /tmp/incidentiq-preview-api
-          wrangler deploy --dry-run --config wrangler.etl.preview.toml --outdir /tmp/incidentiq-preview-etl
+          uv run pywrangler deploy --dry-run --config wrangler.preview.toml --outdir /tmp/incidentiq-preview-api
+          uv run pywrangler deploy --dry-run --config wrangler.etl.preview.toml --outdir /tmp/incidentiq-preview-etl
           wrangler deploy --dry-run --config mcp/wrangler.preview.toml --outdir /tmp/incidentiq-preview-mcp
 
       - name: Apply migrations to preview D1 only
@@ -103,12 +111,14 @@ jobs:
       - name: Deploy preview Workers
         run: |
           export PATH="$PWD/mcp/node_modules/.bin:$PATH"
-          wrangler deploy --config wrangler.preview.toml
-          wrangler deploy --config wrangler.etl.preview.toml
+          uv run pywrangler deploy --config wrangler.preview.toml
+          uv run pywrangler deploy --config wrangler.etl.preview.toml
           wrangler deploy --config mcp/wrangler.preview.toml
 
       - name: Verify preview API behavior
-        run: ./scripts/smoke_test.sh "$PREVIEW_API_WORKER_URL" "$PREVIEW_SMOKE_API_KEY"
+        run: |
+          printf '%s  %s\n' '74536e30c3a96f737342322cbe7162819565513308e2dd41a726edc7e3ce26d8' scripts/smoke_test.sh | sha256sum --check --status
+          bash scripts/smoke_test.sh "$PREVIEW_API_WORKER_URL" "$PREVIEW_SMOKE_API_KEY"
 
       - name: Verify MCP protocol endpoint
         run: |
@@ -118,3 +128,19 @@ jobs:
             -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
             "$PREVIEW_MCP_WORKER_URL/mcp")"
           python3 -c 'import json,sys; names={x["name"] for x in json.loads(sys.argv[1])["result"]["tools"]}; assert {"search_runbooks","get_incident","get_triage_report"} <= names' "$response"
+
+      - name: Collect deploy evidence
+        run: |
+          mkdir -p deploy-evidence
+          {
+            printf 'deploy_time=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf 'environment=preview\n'
+            printf 'api_worker_url=%s\n' "$PREVIEW_API_WORKER_URL"
+            printf 'mcp_worker_url=%s\n' "$PREVIEW_MCP_WORKER_URL"
+          } > deploy-evidence/deploy.txt
+          curl --fail --silent --show-error --max-time 15 "$PREVIEW_API_WORKER_URL/health/ready" > deploy-evidence/health.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: incidentiq-deploy-evidence
+          path: deploy-evidence/
+          if-no-files-found: error

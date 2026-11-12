@@ -20,6 +20,17 @@ max_batch_timeout = 30
 max_retries = 3
 dead_letter_queue = "etl-dlq"
 
+# Producer bindings: the consumer re-enqueues transient failures to ETL_QUEUE
+# (attempt backoff) and dead-letters exhausted jobs to ETL_DLQ. Without these,
+# retry()/send() fail silently and messages loop on platform retries.
+[[queues.producers]]
+binding = "ETL_QUEUE"
+queue = "etl-queue"
+
+[[queues.producers]]
+binding = "ETL_DLQ"
+queue = "etl-dlq"
+
 [observability]
 enabled = true
 

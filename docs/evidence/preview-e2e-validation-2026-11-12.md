@@ -71,6 +71,16 @@ retrievable via namespace/metadata-filtered search ~5–15 min after ingestion.
 Unfiltered raw queries see new vectors sooner; D1-backed lookups are immediate.
 No action required — noted for SLO expectations on RAG freshness.
 
+## Production smoke tenant (seeded 2026-11-12)
+
+Tenant `5f42b259-9004-46dc-b59e-280ccaa69c89` ("Production Smoke") seeded into
+production D1 `ai-knowledge-platform` (`aa3e2700-ccdc-4ab5-af89-abd5f3b01d26`)
+via `scripts/seed_tenant.py`; INSERT verified with a follow-up SELECT. Its API
+key is set as the GitHub secret `PROD_SMOKE_API_KEY` (repo scope, shown once).
+`scripts/seed.sql` was applied then deleted. Pending before merge: user-created
+`CLOUDFLARE_PREVIEW_API_TOKEN` + `CLOUDFLARE_PROD_API_TOKEN` GitHub secrets and
+the `production` environment approval.
+
 ## Known residuals
 
 - `etl-dlq-preview` has 0 consumers (by design — inspection only).

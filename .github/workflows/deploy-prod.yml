@@ -88,7 +88,9 @@ jobs:
           wrangler deploy --config mcp/wrangler.toml
 
       - name: Smoke test production API
-        run: ./scripts/smoke_test.sh "$PROD_API_WORKER_URL" "$PROD_SMOKE_API_KEY"
+        run: |
+          printf '%s  %s\n' '74536e30c3a96f737342322cbe7162819565513308e2dd41a726edc7e3ce26d8' scripts/smoke_test.sh | sha256sum --check --status
+          bash scripts/smoke_test.sh "$PROD_API_WORKER_URL" "$PROD_SMOKE_API_KEY"
 
       - name: Verify production MCP protocol endpoint
         run: |
@@ -115,7 +117,7 @@ jobs:
             printf 'api_worker_url=%s\n' "$PROD_API_WORKER_URL"
             printf 'mcp_worker_url=%s\n' "$PROD_MCP_WORKER_URL"
           } > deploy-evidence/deploy.txt
-          ./scripts/health-cf.sh "$PROD_API_WORKER_URL" > deploy-evidence/health.txt 2>&1 || true
+          curl --fail --silent --show-error --max-time 15 "$PROD_API_WORKER_URL/health/ready" > deploy-evidence/health.txt
       - uses: actions/upload-artifact@v4
         with:
           name: incidentiq-deploy-evidence

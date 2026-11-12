@@ -49,7 +49,7 @@
   function authHeaders(idem) {
     return {
       "X-Api-Key": getApiKey(),
-      "Idempotency-Key": idem || "req-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8),
+      "Idempotency-Key": idem || "req-" + crypto.randomUUID(),
     };
   }
 
@@ -101,8 +101,8 @@
       btn.setAttribute("aria-selected", active ? "true" : "false");
     });
     if (name === "health") {
-      loadHealth();
-      loadQuota();
+      void loadHealth();
+      void loadQuota();
     }
   }
   tabBtns.forEach((btn) => {
@@ -264,7 +264,12 @@
       (d.documents || []).forEach((doc) => {
         const li = document.createElement("li");
         const statusIcon = doc.status === "processed" ? "✅" : doc.status === "failed" ? "❌" : "⏳";
-        li.innerHTML = `<strong>${esc(doc.filename)}</strong> <span class="meta">${statusIcon} ${esc(doc.status)}${doc.error ? " — " + esc(doc.error) : ""}</span>`;
+        const name = document.createElement("strong");
+        name.textContent = String(doc.filename ?? "");
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = `${statusIcon} ${doc.status ?? ""}${doc.error ? " — " + doc.error : ""}`;
+        li.append(name, " ", meta);
         ul.appendChild(li);
       });
       if (!d.documents || !d.documents.length) {
@@ -389,11 +394,11 @@
   $("btnLookupInc")  && $("btnLookupInc").addEventListener("click", lookupIncident);
   $("btnRetryAsk")   && $("btnRetryAsk").addEventListener("click", ask);
   $("btnRetryLookup") && $("btnRetryLookup").addEventListener("click", lookupIncident);
-  $("btnRefreshHealth") && $("btnRefreshHealth").addEventListener("click", () => { loadHealth(); loadQuota(); });
+  $("btnRefreshHealth") && $("btnRefreshHealth").addEventListener("click", () => { void loadHealth(); void loadQuota(); });
 
-  $("questionInput") && $("questionInput").addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
-  $("incIdem")       && $("incIdem").addEventListener("keydown", (e) => { if (e.key === "Enter") createIncident(); });
-  $("incLookupId")   && $("incLookupId").addEventListener("keydown", (e) => { if (e.key === "Enter") lookupIncident(); });
+  $("questionInput") && $("questionInput").addEventListener("keydown", (e) => { if (e.key === "Enter") void ask(); });
+  $("incIdem")       && $("incIdem").addEventListener("keydown", (e) => { if (e.key === "Enter") void createIncident(); });
+  $("incLookupId")   && $("incLookupId").addEventListener("keydown", (e) => { if (e.key === "Enter") void lookupIncident(); });
 
   $("btnSaveKey") && $("btnSaveKey").addEventListener("click", () => {
     const key = $("apiKeyInput").value.trim();
@@ -414,9 +419,9 @@
 
   // ── Init ────────────────────────────────────────────────────────────────
   updateApiKeyStatus();
-  listDocs();
+  void listDocs();
   // Auto-check health status every 60 s while on health tab.
   setInterval(() => {
-    if (!$("tab-health").hidden) { loadHealth(); loadQuota(); }
+    if (!$("tab-health").hidden) { void loadHealth(); void loadQuota(); }
   }, 60000);
 })();

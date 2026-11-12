@@ -31,7 +31,7 @@ jobs:
           node-version: "22"
 
       - name: Install pinned Wrangler from MCP lockfile
-        run: npm ci
+        run: npm ci --ignore-scripts
         working-directory: mcp
 
       - name: Validate required production secrets and variables

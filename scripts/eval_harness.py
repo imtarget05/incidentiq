@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List
 
@@ -425,8 +426,16 @@ def evaluate(cases, client, env) -> Dict[str, Any]:
 
 # --------------------------------------------------------------------------- main
 
+def resolve_dataset_path(dataset_path: str | None) -> Path:
+    data_dir = (Path(__file__).resolve().parent.parent / "data").resolve()
+    dataset_file = (data_dir / (dataset_path or "rag_eval_dataset.json")).resolve()
+    if not dataset_file.is_relative_to(data_dir) or dataset_file.suffix != ".json":
+        raise ValueError("Dataset must be a JSON file inside the data directory")
+    return dataset_file
+
+
 def main_eval(live_url: str | None, dataset_path: str | None = None) -> None:
-    dataset_file = dataset_path or os.path.join(os.path.dirname(__file__), "..", "data", "rag_eval_dataset.json")
+    dataset_file = resolve_dataset_path(dataset_path)
     if os.path.exists(dataset_file):
         with open(dataset_file, encoding="utf-8") as f:
             cases = json.load(f)
@@ -518,6 +527,6 @@ def main_eval(live_url: str | None, dataset_path: str | None = None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", default=None, help="Deployed worker base URL for live smoke test")
-    parser.add_argument("--dataset", default=None, help="Path to golden dataset JSON file")
+    parser.add_argument("--dataset", default=None, help="Golden dataset JSON file within data/")
     args = parser.parse_args()
     main_eval(args.live, args.dataset)

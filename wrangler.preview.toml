@@ -8,19 +8,19 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "incidentiq-preview"
-database_id = "REPLACE_WITH_PREVIEW_D1_DATABASE_ID"
+database_id = "8e1a7127-b9d3-43fc-82ff-c2dca620c82f"
 
 [[vectorize]]
 binding = "VECTORIZE_INDEX"
-index_name = "REPLACE_WITH_PREVIEW_VECTORIZE_INDEX"
+index_name = "ai-knowledge-vectors-preview"
 
 [[queues.producers]]
 binding = "ETL_QUEUE"
-queue = "REPLACE_WITH_PREVIEW_ETL_QUEUE"
+queue = "etl-queue-preview"
 
 [[queues.producers]]
 binding = "ETL_DLQ"
-queue = "REPLACE_WITH_PREVIEW_ETL_DLQ"
+queue = "etl-dlq-preview"
 
 [assets]
 directory = "./web"

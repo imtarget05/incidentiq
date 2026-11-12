@@ -8,18 +8,18 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "incidentiq-preview"
-database_id = "REPLACE_WITH_PREVIEW_D1_DATABASE_ID"
+database_id = "8e1a7127-b9d3-43fc-82ff-c2dca620c82f"
 
 [[vectorize]]
 binding = "VECTORIZE_INDEX"
-index_name = "REPLACE_WITH_PREVIEW_VECTORIZE_INDEX"
+index_name = "ai-knowledge-vectors-preview"
 
 [[queues.consumers]]
-queue = "REPLACE_WITH_PREVIEW_ETL_QUEUE"
+queue = "etl-queue-preview"
 max_batch_size = 10
 max_batch_timeout = 30
 max_retries = 3
-dead_letter_queue = "REPLACE_WITH_PREVIEW_ETL_DLQ"
+dead_letter_queue = "etl-dlq-preview"
 
 [observability]
 enabled = true

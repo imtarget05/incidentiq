@@ -12,8 +12,8 @@ resource "cloudflare_queue" "etl_queue" {
   settings = {
     # Delivery delay (seconds): 0 for immediate processing.
     delivery_delay = 0
-    # Messages not acked within 60 s are retried.
-    message_retention_period = 345600 # 4 days
+    # Messages not acked within 60 s are retried. Max retention is 86400s (24h).
+    message_retention_period = 86400
   }
 }
 
@@ -23,7 +23,7 @@ resource "cloudflare_queue" "etl_dlq" {
 
   settings = {
     delivery_delay           = 0
-    message_retention_period = 604800 # 7 days — DLQ retains longer for inspection
+    message_retention_period = 86400 # Max retention 24h for DLQ inspection
   }
 }
 

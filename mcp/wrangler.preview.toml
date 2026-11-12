@@ -7,11 +7,11 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "incidentiq-preview"
-database_id = "REPLACE_WITH_PREVIEW_D1_DATABASE_ID"
+database_id = "8e1a7127-b9d3-43fc-82ff-c2dca620c82f"
 
 [[vectorize]]
 binding = "VECTORIZE_INDEX"
-index_name = "REPLACE_WITH_PREVIEW_VECTORIZE_INDEX"
+index_name = "ai-knowledge-vectors-preview"
 
 [ai]
 binding = "AI"
@@ -26,4 +26,4 @@ binding = "API"
 service = "incidentiq-preview"
 
 [vars]
-API_WORKER_URL = "REPLACE_WITH_PREVIEW_API_WORKER_URL"
+API_WORKER_URL = "https://incidentiq-preview.tanmainguyenbinh.workers.dev"

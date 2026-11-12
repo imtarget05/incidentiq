@@ -81,6 +81,77 @@ key is set as the GitHub secret `PROD_SMOKE_API_KEY` (repo scope, shown once).
 `CLOUDFLARE_PREVIEW_API_TOKEN` + `CLOUDFLARE_PROD_API_TOKEN` GitHub secrets and
 the `production` environment approval.
 
+## Production deployment + DR drills (2026-11-12, later session)
+
+### Production deploy (OAuth, wrangler CLI)
+
+D1 migrations 001–004 applied to `ai-knowledge-platform` (`aa3e2700…`),
+then all three workers deployed and verified:
+
+| Worker | Version | Verify |
+|---|---|---|
+| `ai-knowledge-platform` (API) | `8d67a0af…` (after rollback recovery; first deploy `25852555…`) | smoke 7/7 PASS, `/health/ready` all ok |
+| `ai-knowledge-etl` (ETL) | `f875de9e…` (with producer bindings) | consumer of `etl-queue` |
+| `ai-knowledge-mcp` (MCP) | `c1fd20ff…` (service binding) | tools/list 7 tools, ask_question graceful abstention |
+
+Production smoke tenant `5f42b259-9004-46dc-b59e-280ccaa69c89` seeded into prod
+D1; its key is GitHub secret `PROD_SMOKE_API_KEY`.
+
+### CI/CD state
+
+PR #2 merged to main (squash `4622ff9`). `deploy-prod.yml` runs on push to main
+but fails at "Apply D1 migrations" — the existing `CLOUDFLARE_API_TOKEN` GitHub
+secret is expired (Cloudflare error 9109). Both deploy workflows now fall back
+to it (`secrets.CLOUDFLARE_*_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN`).
+**Blocking item: set fresh `CLOUDFLARE_PROD_API_TOKEN` /
+`CLOUDFLARE_PREVIEW_API_TOKEN` secrets, then re-run `gh workflow run deploy-prod.yml`.**
+The `production` environment has a required-reviewer gate (restored after
+temporary removal); admins bypass it (`can_admins_bypass=true`).
+
+### ETL failure → DLQ drill (preview, deterministic)
+
+New hook `ETL_TEST_FAIL_EMBEDDING=1` makes embeddings come back empty so the
+retry/DLQ path is exercised end to end:
+
+1. Upload with hook active → consumer attempts, re-enqueues attempt+1 → after
+   MAX_RETRIES the document is marked `failed` with error `embedding_incomplete`
+   and the message is dead-lettered to `etl-dlq-preview`. Verified in D1.
+2. Hook removed → `POST /api/v1/documents/{id}/reindex` → document returns to
+   `processed` (recovery path verified).
+
+**Latent bug found and fixed by the drill:** the ETL consumer had no
+`[[queues.producers]]` bindings for `ETL_QUEUE`/`ETL_DLQ`, so its in-code
+re-enqueue and DLQ sends failed silently and messages looped on platform
+retries. Fixed in `wrangler.etl.toml` + `wrangler.etl.preview.toml` and
+redeployed (prod ETL `f875de9e…`).
+
+### D1 backup/restore drill (preview)
+
+`wrangler d1 export` fails on this schema: "cannot export databases with
+virtual tables (like FTS5)" (platform limitation, also on wrangler 4.161.0).
+New `scripts/d1_logical_backup.py` dumps every non-FTS table with
+FK-topological INSERT ordering. Restore drill: fresh DB
+`incidentiq-restore-drill` ← 4 migrations + restore file → every table count
+matched the source exactly and `documents_fts` rebuilt automatically via
+triggers (fts rows = 1). Drill DB deleted afterwards.
+
+### Rollback evidence (live, prod)
+
+`wrangler rollback` invoked without arguments *executes a rollback* (it does
+not print help). This rolled the prod API back to the Nov-9 version
+`2f65cfae…` at 15:59Z; `/health/ready` 404'd. Recovery: redeploy current code
+(`8d67a0af…`) — healthy within ~10 s, smoke 7/7 again. Documented procedure:
+
+    wrangler deployments list --name ai-knowledge-platform   # find version id
+    wrangler rollback --version <old-version-id> --message "reason"  # deliberate rollback
+    uv run pywrangler deploy                                  # recovery redeploy
+
+### Terraform
+
+`terraform init` + `plan` attempted with the wrangler OAuth token: the provider
+rejects JWT tokens ("API tokens must only contain characters a-z…"). Terraform
+import/apply is blocked on a valid Cloudflare API token (same blocker as CI).
+
 ## Known residuals
 
 - `etl-dlq-preview` has 0 consumers (by design — inspection only).

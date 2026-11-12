@@ -34,3 +34,8 @@ Thumbs.db
 
 # Generated seed output (contains tenant ids + API key hashes)
 scripts/seed.sql
+
+# terraform + backup artifacts
+.terraform/
+*.tfstate*
+backups/

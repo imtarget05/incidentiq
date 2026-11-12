@@ -54,7 +54,7 @@ jobs:
         run: node --test web/app.test.cjs
 
       - name: Run Python tests with coverage
-        run: pytest --cov=main --cov=etl --cov-report=xml:coverage.xml --cov-report=term-missing tests/api
+        run: python -m pytest --cov=main --cov=etl --cov-report=xml:coverage.xml --cov-report=term-missing tests/api
 
       - name: Run fake-backed evaluation harness
         run: python scripts/eval_harness.py

@@ -13,15 +13,18 @@ class FakeVectorize:
         self.upserted = []
         self.deleted = []
 
-    async def query(self, vector=None, topK=None, returnMetadata=None, filter=None):
+    async def query(self, vector=None, options=None, **kwargs):
+        # Prod calls the v2 positional form query(vector, {"topK": ...});
+        # kwargs kept for any legacy keyword-style callers.
+        opts = options or kwargs
         # tenant isolation: only return matches whose metadata.tenant_id == filter tenant_id
-        tenant_id = (filter or {}).get("tenant_id")
+        tenant_id = (opts.get("filter") or {}).get("tenant_id")
         out = []
         for m in self.matches:
             if tenant_id and m.get("metadata", {}).get("tenant_id") != tenant_id:
                 continue
             out.append(m)
-        return {"matches": out[: topK or len(out)]}
+        return {"matches": out[: opts.get("topK") or len(out)]}
 
     async def upsert(self, points):
         self.upserted = list(points)

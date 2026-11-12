@@ -12,12 +12,15 @@ class FakeVectorize:
         self.should_fail = should_fail
         self.matches = matches or []
 
-    async def query(self, vector=None, topK=None, returnMetadata=None, filter=None):
+    async def query(self, vector=None, options=None, **kwargs):
+        # Prod calls the v2 positional form query(vector, {"topK": ...});
+        # kwargs kept for any legacy keyword-style callers.
+        opts = options or kwargs
         if self.should_fail:
             raise RuntimeError("vectorize unavailable")
-        tenant_id = (filter or {}).get("tenant_id")
+        tenant_id = (opts.get("filter") or {}).get("tenant_id")
         out = [m for m in self.matches if not tenant_id or m.get("metadata", {}).get("tenant_id") == tenant_id]
-        return {"matches": out[: topK or len(out)]}
+        return {"matches": out[: opts.get("topK") or len(out)]}
 
 
 class FakeAI:

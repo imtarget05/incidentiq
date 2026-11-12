@@ -47,7 +47,7 @@ jobs:
       - name: Type-check and test MCP
         run: |
           npm run typecheck
-          npm test
+          npm run test:coverage
         working-directory: mcp
 
       - name: Test web document rendering
@@ -88,6 +88,7 @@ jobs:
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
             -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.javascript.lcov.reportPaths=mcp/coverage/lcov.info
 
   security:
     name: Trivy filesystem scan

@@ -4,8 +4,8 @@ output "d1_database_id" {
 }
 
 output "vectorize_index_name" {
-  description = "Vectorize index name — matches wrangler.toml index_name."
-  value       = cloudflare_vectorize_index.main.name
+  description = "Vectorize index name managed with Wrangler; matches wrangler.toml index_name."
+  value       = var.vectorize_index_name
 }
 
 output "etl_queue_id" {

@@ -1,13 +1,13 @@
 # IncidentIQ Infrastructure
 
-Cloudflare infrastructure managed with Terraform (Cloudflare provider v5).
+Cloudflare infrastructure uses the Terraform configuration in `infrastructure/terraform` (Cloudflare provider v5). Vectorize is managed with Wrangler because the installed provider has no Vectorize index resource.
 
 ## Resources managed
 
 | Resource | Preview name | Production name |
 |---|---|---|
 | D1 database | `incidentiq-preview` | `ai-knowledge-platform` |
-| Vectorize index | `ai-knowledge-vectors-preview` | `ai-knowledge-vectors` |
+| Vectorize index (Wrangler) | `ai-knowledge-vectors-preview` | `ai-knowledge-vectors` |
 | ETL queue | `etl-queue-preview` | `etl-queue` |
 | ETL DLQ | `etl-dlq-preview` | `etl-dlq` |
 | KV namespace | `preview-incidentiq-rate-limit` | `prod-incidentiq-rate-limit` |
@@ -30,7 +30,7 @@ Cloudflare infrastructure managed with Terraform (Cloudflare provider v5).
 ```bash
 cd infrastructure/terraform
 terraform init
-terraform apply -var-file=environments/preview/terraform.tfvars \
+terraform plan -var-file=environments/preview/terraform.tfvars \
   -var="cloudflare_api_token=$CF_PREVIEW_TOKEN" \
   -var="cloudflare_account_id=$CF_ACCOUNT_ID"
 ```
@@ -40,10 +40,12 @@ terraform apply -var-file=environments/preview/terraform.tfvars \
 ```bash
 cd infrastructure/terraform
 terraform init
-terraform apply -var-file=environments/production/terraform.tfvars \
+terraform plan -var-file=environments/production/terraform.tfvars \
   -var="cloudflare_api_token=$CF_PROD_TOKEN" \
   -var="cloudflare_account_id=$CF_ACCOUNT_ID"
 ```
+
+The production D1 database and ETL queues already exist in Cloudflare. Configure a durable Terraform state backend and import those resources before an `apply`; an empty state would try to create duplicate resources. Verify the Vectorize index separately with `wrangler vectorize list` (1024 dimensions, cosine metric). For a new environment, create its index with `wrangler vectorize create <name> --dimensions=1024 --metric=cosine` before deploying Workers.
 
 ## Disaster Recovery
 

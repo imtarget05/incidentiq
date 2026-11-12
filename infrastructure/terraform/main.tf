@@ -4,36 +4,26 @@ resource "cloudflare_d1_database" "main" {
   name       = var.d1_database_name
 }
 
-# ── Vectorize Index (1024-dim cosine, matches wrangler.toml) ─────────────────
-resource "cloudflare_vectorize_index" "main" {
-  account_id = var.cloudflare_account_id
-  name       = var.vectorize_index_name
-  config = {
-    dimensions = 1024
-    metric     = "cosine"
-  }
-}
-
 # ── Queues ────────────────────────────────────────────────────────────────────
 resource "cloudflare_queue" "etl_queue" {
   account_id = var.cloudflare_account_id
-  name       = var.etl_queue_name
+  queue_name = var.etl_queue_name
 
   settings = {
     # Delivery delay (seconds): 0 for immediate processing.
-    delivery_delay          = 0
+    delivery_delay = 0
     # Messages not acked within 60 s are retried.
-    message_retention_period = 345600  # 4 days
+    message_retention_period = 345600 # 4 days
   }
 }
 
 resource "cloudflare_queue" "etl_dlq" {
   account_id = var.cloudflare_account_id
-  name       = var.etl_dlq_name
+  queue_name = var.etl_dlq_name
 
   settings = {
     delivery_delay           = 0
-    message_retention_period = 604800  # 7 days — DLQ retains longer for inspection
+    message_retention_period = 604800 # 7 days — DLQ retains longer for inspection
   }
 }
 

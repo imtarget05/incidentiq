@@ -170,6 +170,13 @@ async function callApiWorker(env: Env, path: string, method: "GET" | "POST", bod
   if (method === "POST" && body && !isMultipart) headers["Content-Type"] = "application/json";
   const init: RequestInit = { method, headers };
   if (method === "POST" && body) init.body = isMultipart ? body as FormData : JSON.stringify(body);
+  // Same-account Worker-to-Worker fetches over a public URL are rejected with
+  // error 1042; prefer the service binding when available, fall back to the
+  // public URL (local dev / cross-account testing).
+  const svc = (env as unknown as Record<string, { fetch?: (req: Request) => Promise<Response> } | undefined>)["API"];
+  if (svc && typeof svc.fetch === "function") {
+    return svc.fetch(new Request("https://api.internal" + path, init));
+  }
   return fetch(env.API_WORKER_URL + path, init);
 }
 
@@ -259,7 +266,7 @@ export default {
           const seen = new Set<string>();
           if (vector) {
             try {
-              const raw = await env.VECTORIZE_INDEX.query({ vector, topK, returnMetadata: true, filter: { tenant_id: tenantId } } as any);
+              const raw = await env.VECTORIZE_INDEX.query(vector, { topK, returnMetadata: "all", namespace: tenantId, filter: { tenant_id: tenantId } } as any);
               for (const m of (raw as any).matches ?? []) {
                 const meta = m.metadata ?? {};
                 const docId = meta.document_id;

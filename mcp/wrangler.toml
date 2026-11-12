@@ -17,5 +17,11 @@ binding = "AI"
 [observability]
 enabled = true
 
+# Service binding: same-account Worker-to-Worker calls over a public URL are
+# rejected with Cloudflare error 1042, so route API calls through the binding.
+[[services]]
+binding = "API"
+service = "ai-knowledge-platform"
+
 [vars]
 API_WORKER_URL = "https://ai-knowledge-platform.tanmainguyenbinh.workers.dev"

@@ -27,6 +27,9 @@ class FakeVectorize:
         self.upserted = list(points)
         return SimpleNamespace()
 
+    async def deleteByIds(self, ids=None):
+        return await self.delete(ids=ids)
+
     async def delete(self, ids=None):
         self.deleted = list(ids or [])
         return SimpleNamespace()

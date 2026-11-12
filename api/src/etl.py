@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import asyncio
 import re
 from typing import Any, Dict, List, Optional
 
@@ -74,9 +75,16 @@ async def embed_texts(env: Any, texts: List[str]) -> List[Optional[List[float]]]
             "@cf/qwen/qwen3-embedding-0.6b",
             {"text": texts},
         )
-        vectors = result.get("vectors") if isinstance(result, dict) else None
-        if vectors:
-            return [list(map(float, v)) for v in vectors]
+        raw_vectors = None
+        if isinstance(result, dict):
+            raw_vectors = result.get("vectors") or result.get("data")
+        if raw_vectors:
+            vectors: List[List[float]] = []
+            for item in raw_vectors:
+                if isinstance(item, dict):  # newer schema: {"embedding": [...]}
+                    item = item.get("embedding") or item.get("vector") or item.get("data")
+                vectors.append([float(x) for x in item])
+            return vectors
     except Exception:
         pass
     return [None] * len(texts)
@@ -99,7 +107,20 @@ async def _delete_vectors_for_document(env: Any, document_id: str, tenant_id: st
         if vid:
             vector_ids.append(vid)
     if vector_ids:
-        await env.VECTORIZE_INDEX.delete(ids=vector_ids)
+        last_exc = None
+        for _attempt in range(3):  # Vectorize API returns transient errors while
+            try:                   # its async mutation backlog is processing.
+                _delete_by = getattr(env.VECTORIZE_INDEX, "deleteByIds", None)
+                if _delete_by is not None:
+                    await _delete_by(vector_ids)
+                else:
+                    await env.VECTORIZE_INDEX.delete(ids=vector_ids)
+                break
+            except Exception as exc:
+                last_exc = exc
+                await asyncio.sleep(2 * (_attempt + 1))
+        else:
+            raise last_exc if last_exc else RuntimeError("vectorize delete failed")
     return vector_ids
 
 
@@ -114,7 +135,7 @@ async def process_document(env: Any, document_id: str, tenant_id: str,
     if reindex:
         try:
             await _delete_vectors_for_document(env, document_id, tenant_id)
-        except Exception:
+        except Exception as exc:
             return {
                 "status": "retry" if attempt < MAX_RETRIES else "dlq",
                 "chunks": 0,
@@ -149,6 +170,7 @@ async def process_document(env: Any, document_id: str, tenant_id: str,
         points.append({
             "id": point_id,
             "values": vector,
+            "namespace": tenant_id,
             "metadata": {
                 "document_id": document_id,
                 "tenant_id": tenant_id,

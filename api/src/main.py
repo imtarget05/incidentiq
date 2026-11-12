@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import asyncio
 import re
 import time
 import uuid
@@ -346,7 +347,20 @@ async def _drop_document_vectors(env: Any, document_id: str, tenant_id: str) -> 
     vector_ids = [_row_col(c, "vector_id", 1) for c in (chunks or [])
                   if _row_col(c, "vector_id", 1)]
     if vector_ids:
-        await env.VECTORIZE_INDEX.delete(ids=vector_ids)
+        last_exc: Exception | None = None
+        for _attempt in range(3):  # Vectorize API returns transient errors while
+            try:                   # its async mutation backlog is processing.
+                _delete_by = getattr(env.VECTORIZE_INDEX, "deleteByIds", None)
+                if _delete_by is not None:
+                    await _delete_by(vector_ids)
+                else:
+                    await env.VECTORIZE_INDEX.delete(ids=vector_ids)
+                break
+            except Exception as exc:
+                last_exc = exc
+                await asyncio.sleep(2 * (_attempt + 1))
+        else:
+            raise last_exc if last_exc else RuntimeError("vectorize delete failed")
     return vector_ids
 
 
@@ -355,6 +369,22 @@ def _safe_json(value: Any) -> Any:
         return None
     if isinstance(value, (list, dict)):
         return value
+
+
+def _llm_text(llm: Any) -> str:
+    """Extract answer text from a Workers AI chat response.
+
+    Newer models (gpt-oss) return OpenAI-compatible
+    {"choices": [{"message": {"content": ...}}]}; some return {"response": "..."}.
+    """
+    if not isinstance(llm, dict):
+        return str(llm or "")
+    if llm.get("response"):
+        return str(llm["response"])
+    try:
+        return str(llm["choices"][0]["message"]["content"] or "")
+    except (KeyError, IndexError, TypeError):
+        return ""
     try:
         return json.loads(value)
     except Exception:
@@ -590,8 +620,12 @@ async def list_documents(request: Request,
         return _json_error(500, "db_query_failed", str(exc))
     docs = []
     for r in rows:
-        docs.append({"id": r[0], "filename": r[1], "status": r[2],
-                     "uploaded_at": r[3], "processed_at": r[4], "error": r[5]})
+        docs.append({"id": _row_col(r, "id", 0),
+                     "filename": _row_col(r, "filename", 1),
+                     "status": _row_col(r, "status", 2),
+                     "uploaded_at": _row_col(r, "uploaded_at", 3),
+                     "processed_at": _row_col(r, "processed_at", 4),
+                     "error": _row_col(r, "error", 5)})
     return JSONResponse({"documents": docs})
 
 
@@ -704,7 +738,7 @@ async def reindex_document(document_id: str, request: Request,
         return JSONResponse({"error": {"code": "forbidden", "message": "document not in workspace"}}, status_code=403)
     try:
         await _drop_document_vectors(env, document_id, tenant_id)
-    except Exception:
+    except Exception as _e:
         return _json_error(503, "vector_cleanup_failed", "Document index cleanup failed; reindex was not applied")
     try:
         await env.DB.prepare(
@@ -1133,10 +1167,11 @@ async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -
         question_vector = None
     if question_vector:
         try:
-            raw = await env.VECTORIZE_INDEX.query(
-                vector=question_vector, topK=top_k, returnMetadata=True,
-                filter={"tenant_id": tenant_id},
-            )
+            raw = await env.VECTORIZE_INDEX.query(question_vector, {
+                "topK": top_k, "returnMetadata": "all",
+                "namespace": tenant_id,
+                "filter": {"tenant_id": tenant_id},
+            })
             matches = raw.get("matches", []) if isinstance(raw, dict) else []
             for m in matches:
                 meta = m.get("metadata", {}) or {}
@@ -1300,7 +1335,7 @@ async def triage_incident(incident_id: str, request: Request,
             ],
             "max_tokens": 512,
         })
-        answer_text = llm.get("response", "") if isinstance(llm, dict) else str(llm)
+        answer_text = _llm_text(llm)
         usage = llm.get("usage", {}) if isinstance(llm, dict) else {}
         tokens_used = usage.get("total_tokens", 0)
     except Exception:
@@ -1433,19 +1468,19 @@ async def ask_question(request: Request,
         embed = await env.ai.run("@cf/qwen/qwen3-embedding-0.6b", {"text": [question]})
         vectors = embed.get("vectors") or embed.get("data") or []
         question_vector = vectors[0] if vectors else None
-    except Exception:
+    except Exception as _e:
         question_vector = None
 
     # 2. Vector search (tenant-isolated via metadata filter).
     context_chunks: List[Dict[str, Any]] = []
     if question_vector:
         try:
-            results = await env.VECTORIZE_INDEX.query(
-                vector=question_vector,
-                topK=5,
-                returnMetadata=True,
-                filter={"tenant_id": tenant_id},
-            )
+            results = await env.VECTORIZE_INDEX.query(question_vector, {
+                "topK": 5,
+                "returnMetadata": "all",
+                "namespace": tenant_id,
+                "filter": {"tenant_id": tenant_id},
+            })
             matches = results.get("matches", []) if isinstance(results, dict) else []
             for m in matches:
                 meta = m.get("metadata", {}) or {}
@@ -1456,7 +1491,7 @@ async def ask_question(request: Request,
                     "content": meta.get("content", ""),
                     "score": m.get("score", 0),
                 })
-        except Exception:
+        except Exception as _e:
             context_chunks = []
 
     # 3. Build cited context.
@@ -1488,7 +1523,7 @@ async def ask_question(request: Request,
             ],
             "max_tokens": 512,
         })
-        answer = llm.get("response", "") if isinstance(llm, dict) else str(llm)
+        answer = _llm_text(llm)
         usage = llm.get("usage", {}) if isinstance(llm, dict) else {}
         tokens_used = usage.get("total_tokens", 0)
     except Exception:

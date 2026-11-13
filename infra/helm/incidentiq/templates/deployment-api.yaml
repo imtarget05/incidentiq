@@ -1,0 +1,77 @@
+{{- if .Values.deploy.api }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "incidentiq.fullname" . }}-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "incidentiq.labels" . | nindent 4 }}
+    app: incidentiq-api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      app: incidentiq-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: incidentiq-api
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+      - name: api
+        image: {{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}
+        imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+        command: {{ .Values.api.command }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.api.containerPort }}
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        {{- range .Values.api.env }}
+        - name: {{ .name }}
+          {{- if .valueFrom }}
+          valueFrom:
+            {{- toYaml .valueFrom | nindent 12 }}
+          {{- else }}
+          value: {{ .value | quote }}
+          {{- end }}
+        {{- end }}
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          {{- toYaml .Values.api.resources | nindent 10 }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+              - ALL
+{{- end }}

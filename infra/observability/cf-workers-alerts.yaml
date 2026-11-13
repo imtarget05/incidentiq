@@ -1,0 +1,54 @@
+groups:
+  - name: incidentiq-cf-workers-slo
+    rules:
+      # ── SLI: Worker error rate ──
+      - alert: IncidentIQWorkerHighErrorRate
+        expr: |
+          sum(rate(cloudflare_worker_requests_total{script="ai-knowledge-platform",status=~"5.."}[5m]))
+          /
+          sum(rate(cloudflare_worker_requests_total{script="ai-knowledge-platform"}[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          service: incidentiq-worker
+          slo: error_rate
+        annotations:
+          summary: "IncidentIQ Worker error rate > 1%"
+          description: "Tỷ lệ lỗi 5xx từ Worker {{ $value | humanizePercentage }} trong 5 phút."
+
+      # ── SLI: Worker CPU/time limit ──
+      - alert: IncidentIQWorkerCpuLimit
+        expr: |
+          sum(rate(cloudflare_worker_cpu_time_seconds_total{script="ai-knowledge-platform"}[5m]))
+          > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          service: incidentiq-worker
+          slo: saturation
+        annotations:
+          summary: "IncidentIQ Worker CPU time saturation > 80%"
+          description: "Worker tiêu thụ CPU time {{ $value | humanizePercentage }} trong 5 phút."
+
+      # ── D1 availability ──
+      - alert: IncidentIQD1Unavailable
+        expr: cloudflare_d1_query_errors_total{database="incidentiq"} > 0
+        for: 2m
+        labels:
+          severity: critical
+          service: incidentiq-d1
+        annotations:
+          summary: "IncidentIQ D1 query errors"
+          description: "Có lỗi truy vấn D1: {{ $value }} trong 2 phút."
+
+      # ── Queue DLQ depth ──
+      - alert: IncidentIQEtlDlqDepth
+        expr: cloudflare_queue_dead_letter_messages{queue="etl-dlq"} > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: incidentiq-etl
+          slo: queue_health
+        annotations:
+          summary: "IncidentIQ ETL DLQ có >10 tin nhắn"
+          description: "Queue etl-dlq đang chứa {{ $value }} tin nhắn chưa xử lý."

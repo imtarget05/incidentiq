@@ -1,0 +1,91 @@
+name: "4. Eval & Regression (IncidentIQ Option B)"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Backend API base URL (default = local mock)"
+        required: false
+        default: ""
+      run_full_suite:
+        description: "Run full golden dataset suite"
+        type: boolean
+        default: false
+
+jobs:
+  fixture-smoke:
+    name: "Fixture Smoke Test (Mock Stack)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install requests pytest fastapi uvicorn httpx
+      - name: Offline grader tests
+        run: python -m pytest eval/tests -q || true
+      - name: Start local mock backend
+        run: |
+          nohup python eval/mock_backend.py > /tmp/mock_backend.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8081/api/actuator/health > /dev/null && { echo "✅ mock backend up"; exit 0; }
+            sleep 2
+          done
+          echo "❌ mock backend failed to start"
+          cat /tmp/mock_backend.log
+          exit 1
+      - name: Run fixture benchmark (fast gate)
+        env:
+          BASE_URL: ${{ inputs.base_url || 'http://127.0.0.1:8081/api' }}
+        run: |
+          python eval/run_live_benchmark.py --base-url "$BASE_URL" \
+            --output eval/results/fixture_eval.json
+      - name: Run full question suite (optional)
+        if: ${{ inputs.run_full_suite == true }}
+        env:
+          BASE_URL: ${{ inputs.base_url || 'http://127.0.0.1:8081/api' }}
+        run: |
+          python eval/run_live_benchmark.py --base-url "$BASE_URL" \
+            --questions eval/questions.json \
+            --output eval/results/full_eval.json || true
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incidentiq-eval-report
+          path: eval/results/
+          retention-days: 30
+
+  live-benchmark:
+    name: "Live Retrieval & LLM Benchmark"
+    if: ${{ inputs.base_url != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run live benchmark
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          python eval/run_live_benchmark.py --base-url "$BASE_URL" \
+            --questions eval/golden_dataset.json \
+            --output eval/results/live_benchmark.json
+      - name: Upload live benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incidentiq-live-benchmark-report
+          path: eval/results/live_benchmark.json
+          retention-days: 30

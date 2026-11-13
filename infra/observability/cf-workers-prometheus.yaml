@@ -1,0 +1,40 @@
+# Prometheus scrape config cho Cloudflare Workers (IncidentIQ)
+# Cloudflare Workers exposes metrics qua GraphQL API. Cấu hình này dùng để
+# Prometheus thu thập metrics từ CF Workers thông qua Cloudflare API.
+
+global:
+  scrape_interval: 30s
+  scrape_timeout: 15s
+
+scrape_configs:
+  - job_name: "cloudflare-workers-incidentiq"
+    honor_labels: true
+    scrape_interval: 30s
+    # Cloudflare API token cần permissions: Workers Scripts Read, Account Settings Read
+    # Mettre TF_VAR_cloudflare_api_token vào env của Prometheus.
+    metrics_path: /api/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/ai-knowledge-platform/metrics
+    scheme: https
+    basic_auth:
+      username: "token"
+      password: ${CLOUDFLARE_API_TOKEN}
+    static_configs:
+      - targets:
+          - "api.cloudflare.com"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __address__
+        replacement: api.cloudflare.com:443
+
+  - job_name: "cloudflare-d1-incidentiq"
+    metrics_path: /api/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/incidentiq/metrics
+    scheme: https
+    basic_auth:
+      username: "token"
+      password: ${CLOUDFLARE_API_TOKEN}
+    static_configs:
+      - targets:
+          - "api.cloudflare.com"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __address__
+        replacement: api.cloudflare.com:443

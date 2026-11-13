@@ -1,0 +1,18 @@
+{{- if .Values.deploy.api }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "incidentiq.fullname" . }}-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "incidentiq.labels" . | nindent 4 }}
+    app: incidentiq-api
+spec:
+  type: {{ .Values.service.api.type }}
+  selector:
+    app: incidentiq-api
+  ports:
+  - name: http
+    port: {{ .Values.service.api.port }}
+    targetPort: {{ .Values.service.api.targetPort }}
+{{- end }}

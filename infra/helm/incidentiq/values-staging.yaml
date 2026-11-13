@@ -1,0 +1,28 @@
+# incidentiq — values staging (override base)
+namespace: incidentiq-staging
+
+image:
+  tag: "sha-${GITHUB_SHA}"
+  pullPolicy: IfNotPresent
+
+api:
+  replicaCount: 2
+  env:
+    - name: ENVIRONMENT
+      value: "staging"
+
+redis:
+  enabled: true
+
+secret:
+  stringData:
+    DATABASE_URL: "CHANGE_ME_STAGING"
+    REDIS_URL: "CHANGE_ME_STAGING_REDIS"
+
+ingress:
+  enabled: true
+  hosts:
+    - host: incidentiq-staging.example.com
+      paths:
+        - path: /
+          pathType: Prefix

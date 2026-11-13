@@ -1,0 +1,26 @@
+[
+  {
+    "id": "incidentiq-001",
+    "question": "Làm thế nào để tạo incident mới cho sự cố dịch vụ?",
+    "golden_answer": "Truy cập menu Incident → Tạo mới, điền tiêu đề, mức độ nghiêm trọng và mô tả, sau đó gửi để theo dõi.",
+    "expected_concepts": ["tạo incident", "mức độ nghiêm trọng", "dịch vụ"],
+    "expected_source_keywords": ["incidents", "severity"],
+    "category": "incident_create"
+  },
+  {
+    "id": "incidentiq-002",
+    "question": "Cách phân loại mức độ ưu tiên của một sự cố?",
+    "golden_answer": "Ưu tiên được phân loại theo tác động đến dịch vụ: critical, high, medium, low, kèm theo SLA xử lý tương ứng.",
+    "expected_concepts": ["critical", "high", "medium", "low", "SLA"],
+    "expected_source_keywords": ["severity", "priority", "sla"],
+    "category": "triage"
+  },
+  {
+    "id": "incidentiq-003",
+    "question": "Theo dõi tiến độ xử lý incident như thế nào?",
+    "golden_answer": "Xem chi tiết incident để theo dõi trạng thái, lịch sử sự kiện và thời gian khôi phục dự kiến.",
+    "expected_concepts": ["tiến độ", "trạng thái", "lịch sử sự kiện"],
+    "expected_source_keywords": ["incident_events", "timeline"],
+    "category": "incident_tracking"
+  }
+]

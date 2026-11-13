@@ -1,0 +1,43 @@
+{{- if .Values.deploy.worker }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "incidentiq.fullname" . }}-worker
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "incidentiq.labels" . | nindent 4 }}
+    app: incidentiq-worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app: incidentiq-worker
+  template:
+    metadata:
+      labels:
+        app: incidentiq-worker
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: worker
+        image: {{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}
+        imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+        command: {{ .Values.worker.command }}
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        {{- range .Values.worker.env }}
+        - name: {{ .name }}
+          {{- if .valueFrom }}
+          valueFrom:
+            {{- toYaml .valueFrom | nindent 12 }}
+          {{- else }}
+          value: {{ .value | quote }}
+          {{- end }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.worker.resources | nindent 10 }}
+{{- end }}

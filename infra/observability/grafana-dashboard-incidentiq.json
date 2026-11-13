@@ -1,0 +1,47 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "IncidentIQ Observability",
+    "tags": ["incidentiq", "platform"],
+    "timezone": "UTC",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "type": "stat",
+        "title": "Error Rate",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{status=~\"5..\"}[5m]) / rate(http_requests_total[5m])",
+            "legendFormat": "error_rate"
+          }
+        ]
+      },
+      {
+        "type": "stat",
+        "title": "p95 Latency (s)",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95_latency"
+          }
+        ]
+      },
+      {
+        "type": "stat",
+        "title": "Up",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "up{job=\"incidentiq-api\"}",
+            "legendFormat": "up"
+          }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}

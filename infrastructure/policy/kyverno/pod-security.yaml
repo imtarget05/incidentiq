@@ -1,0 +1,47 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: incidentiq-pod-security
+spec:
+  validationFailureAction: enforce
+  rules:
+    - name: disallow-latest-tag
+      match:
+        resources:
+          kinds:
+            - Deployment
+      validate:
+        message: "Image must not use 'latest' tag"
+        pattern:
+          spec:
+            template:
+              spec:
+                containers:
+                  - image: "!*:latest"
+    - name: require-non-root
+      match:
+        resources:
+          kinds:
+            - Deployment
+      validate:
+        message: "Pod security context must set runAsNonRoot=true"
+        pattern:
+          spec:
+            template:
+              spec:
+                securityContext:
+                  runAsNonRoot: true
+    - name: require-resource-limits
+      match:
+        resources:
+          kinds:
+            - Deployment
+      validate:
+        message: "All containers must define resource limits"
+        pattern:
+          spec:
+            template:
+              spec:
+                containers:
+                  - resources:
+                      limits: "*"

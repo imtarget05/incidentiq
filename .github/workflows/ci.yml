@@ -150,3 +150,44 @@ jobs:
         run: npm audit --audit-level=high
         working-directory: mcp
         continue-on-error: false
+
+  # ════════════════════════════════════════════════════════════════
+  # Secret scanning (gitleaks)
+  # ════════════════════════════════════════════════════════════════
+  gitleaks:
+    name: Secret scanning (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ════════════════════════════════════════════════════════════════
+  # SBOM (Syft) — filesystem scan (no Docker image built in this CI)
+  # ════════════════════════════════════════════════════════════════
+  syft-sbom:
+    name: Generate SBOM (Syft)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Syft SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          output-file: sbom.spdx.json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-incidentiq
+          path: sbom.spdx.json
+          retention-days: 30
+
+  # NOTE: no cosign job here — image build/push + signing is wired at deploy
+  # time (Render/Cloudflare). A `cosign-sign` job with
+  # `if: ${{ secrets.COSIGN_KEY != '' }}` was removed because the `secrets`
+  # context is not allowed in `if` conditions and broke the whole workflow
+  # parse; see PR feat/ci-supply-chain.

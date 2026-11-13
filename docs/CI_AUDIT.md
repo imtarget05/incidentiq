@@ -36,7 +36,7 @@ Source: `.github/workflows/*.yml`
 - Trivy secret scanner covers `vuln,secret,misconfig` at HIGH/CRITICAL with exit-code 1.
 
 ## To do (P0)
-- [ ] Configure `SONAR_TOKEN` (and `SONAR_HOST_URL` if using self-hosted) in repo Secrets/Variables.
-- [ ] Configure preview vars: `PREVIEW_D1_DATABASE_ID`, `PREVIEW_VECTORIZE_INDEX`, `PREVIEW_ETL_QUEUE`, `PREVIEW_ETL_DLQ`, `PREVIEW_API_WORKER_URL`, `PREVIEW_MCP_WORKER_URL`, secrets `CLOUDFLARE_PREVIEW_API_TOKEN`, `PREVIEW_SMOKE_API_KEY`.
-- [ ] Configure production vars: `PROD_API_WORKER_URL`, `PROD_MCP_WORKER_URL`, secrets `CLOUDFLARE_PROD_API_TOKEN`, `PROD_SMOKE_API_KEY`.
-- [ ] Enable GitHub branch protection on `main`: require PR, require review, require CI status checks, require production environment approval.
+- [x] Configure `SONAR_TOKEN` (and `SONAR_HOST_URL` if using self-hosted) in repo Secrets/Variables. **Done 2026-11-13:** both present; CI quality job green with SonarCloud quality gate.
+- [x] Configure preview vars: `PREVIEW_D1_DATABASE_ID`, `PREVIEW_VECTORIZE_INDEX`, `PREVIEW_ETL_QUEUE`, `PREVIEW_ETL_DLQ`, `PREVIEW_API_WORKER_URL`, `PREVIEW_MCP_WORKER_URL`, secrets `CLOUDFLARE_PREVIEW_API_TOKEN`, `PREVIEW_SMOKE_API_KEY`. **Done 2026-11-12:** preview deploy green end to end.
+- [x] Configure production vars: `PROD_API_WORKER_URL`, `PROD_MCP_WORKER_URL`, secrets `CLOUDFLARE_PROD_API_TOKEN`, `PROD_SMOKE_API_KEY`. **Done 2026-11-12:** production deploy green (smoke + MCP tools verified).
+- [x] Enable GitHub branch protection on `main`: require PR, require review, require CI status checks, require production environment approval. **Done 2026-11-13:** 1 required review + 3 required CI checks (quality, security, dependency-audit), enforce_admins; production environment approval already in place.

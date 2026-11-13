@@ -138,11 +138,11 @@ Evidence to collect: Backup file, rollback log, health check after recovery.
 
 ## Sign-off checklist
 
-- [ ] SONAR_TOKEN configured, CI quality job passes
-- [ ] Branch protection enabled on main
-- [ ] Preview deploy passes all 13 steps
+- [x] SONAR_TOKEN configured, CI quality job passes (verified 2026-11-13)
+- [x] Branch protection enabled on main (verified 2026-11-13)
+- [x] Preview deploy passes all 13 steps (run 43372097886, 2026-11-12)
 - [ ] Frontend authentication implemented and tested
-- [ ] Production workers deployed (API, ETL, MCP)
+- [x] Production workers deployed (API, ETL, MCP) (run 43371813019, 2026-11-12)
 - [ ] Health checks all pass (D1, Vectorize, Workers AI, ETL queue)
 - [ ] Tenant isolation tests pass (4/4)
 - [ ] ETL failure tests pass (5/5)

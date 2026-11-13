@@ -26,6 +26,3 @@ enabled = true
 
 [ai]
 binding = "ai"
-
-[vars]
-ETL_TEST_FAIL_EMBEDDING = "1"

@@ -1,0 +1,18 @@
+{{- if .Values.redis.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "incidentiq.fullname" . }}-redis
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "incidentiq.labels" . | nindent 4 }}
+    app: incidentiq-redis
+spec:
+  type: ClusterIP
+  selector:
+    app: incidentiq-redis
+  ports:
+  - name: redis
+    port: {{ .Values.redis.containerPort }}
+    targetPort: {{ .Values.redis.containerPort }}
+{{- end }}

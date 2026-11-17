@@ -1,0 +1,20 @@
+apiVersion: v2
+name: incidentiq
+description: Helm chart for IncidentIQ (API + MCP workers) — base chart, environment overlays via values-<env>.yaml
+type: application
+version: 1.0.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"
+keywords:
+  - incidentiq
+  - api
+  - python
+  - fastapi
+  - cloudflare
+  - argocd
+home: https://github.com/imtarget05/incidentiq
+sources:
+  - https://github.com/imtarget05/incidentiq
+maintainers:
+  - name: imtarget05
+    email: tanmainguyenbinhtan@gmail.com

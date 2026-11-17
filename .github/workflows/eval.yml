@@ -1,0 +1,65 @@
+name: "4. Eval & Regression (IncidentIQ Option B)"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_live_benchmark:
+        description: "Seed synthetic cases and measure the fixed preview API"
+        type: boolean
+        required: true
+        default: false
+
+jobs:
+  fixture-smoke:
+    name: "Fixture Smoke Test (Mock Stack)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install API dependencies
+        run: pip install -r api/requirements.txt
+      - name: Run fake-backed golden evaluation
+        run: python scripts/eval_harness.py
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incidentiq-eval-report
+          path: docs/evaluation.md
+          retention-days: 30
+
+  live-benchmark:
+    name: "Live Retrieval & LLM Benchmark"
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_benchmark == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run live benchmark
+        env:
+          BASE_URL: https://incidentiq-preview.tanmainguyenbinh.workers.dev
+          EVAL_API_KEY: ${{ secrets.PREVIEW_SMOKE_API_KEY }}
+        run: |
+          test -n "$EVAL_API_KEY" || { echo "PREVIEW_SMOKE_API_KEY is required" >&2; exit 1; }
+          python eval/run_live_benchmark.py --base-url "$BASE_URL" \
+            --dataset data/rag_eval_dataset.json \
+            --output eval/results/live_benchmark.json
+      - name: Upload live benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incidentiq-live-benchmark-report
+          path: eval/results/live_benchmark.json
+          retention-days: 30

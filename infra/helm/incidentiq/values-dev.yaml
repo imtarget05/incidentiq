@@ -1,0 +1,23 @@
+# incidentiq — values dev (override base)
+namespace: incidentiq-dev
+
+image:
+  tag: latest
+  pullPolicy: Always
+
+api:
+  replicaCount: 1
+  env:
+    - name: ENVIRONMENT
+      value: "development"
+
+redis:
+  enabled: true
+
+secret:
+  stringData:
+    DATABASE_URL: "CHANGE_ME_DEV"
+    REDIS_URL: "CHANGE_ME_DEV_REDIS"
+
+ingress:
+  enabled: false

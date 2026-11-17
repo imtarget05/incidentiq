@@ -1,0 +1,75 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: incidentiq-preview
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: incidentiq-preview
+    app.kubernetes.io/part-of: incidentiq-system
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: incidentiq-portfolio
+  source:
+    repoURL: "https://github.com/imtarget05/incidentiq.git"
+    targetRevision: main
+    path: infra/helm/incidentiq
+    helm:
+      valueFiles:
+        - values-dev.yaml
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: incidentiq-preview
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: incidentiq-production
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: incidentiq-production
+    app.kubernetes.io/part-of: incidentiq-system
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: incidentiq-portfolio
+  source:
+    repoURL: "https://github.com/imtarget05/incidentiq.git"
+    targetRevision: main
+    path: infra/helm/incidentiq
+    helm:
+      valueFiles:
+        - values-production.yaml
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: incidentiq-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: incidentiq-portfolio
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: "IncidentIQ — DevOps/Platform portfolio project"
+  sourceRepos:
+    - https://github.com/imtarget05/incidentiq.git
+  destinations:
+    - namespace: incidentiq-preview
+      server: https://kubernetes.default.svc
+    - namespace: incidentiq-prod
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  roles:
+    - name: incidentiq-deployer
+      description: "Can sync and manage incidentiq applications"
+      policies:
+        - p, proj.incidentiq-portfolio:incidentiq-deployer, applications, get, incidentiq/*, allow
+        - p, proj.incidentiq-portfolio:incidentiq-deployer, applications, sync, incidentiq/*, allow
+      groups:
+        - incidentiq-deployers
+    - name: incidentiq-reader
+      description: "Read-only access to incidentiq applications"
+      policies:
+        - p, proj.incidentiq-portfolio:incidentiq-reader, applications, get, incidentiq/*, allow
+      groups:
+        - incidentiq-readers

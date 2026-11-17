@@ -1,0 +1,174 @@
+# incidentiq — Helm values (base). Mỗi environment override qua values-<env>.yaml.
+
+nameOverride: ""
+fullnameOverride: ""
+
+namespace: incidentiq
+
+commonLabels: {}
+commonAnnotations: {}
+
+image:
+  repository: ghcr.io/imtarget05/incidentiq-api
+  tag: latest
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+deploy:
+  api: true
+  worker: true
+
+replicaCount: 1
+
+# ── API Deployment ─────────────────────────────────────────────────────────────
+api:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/imtarget05/incidentiq-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  containerPort: 8000
+  command: ["uvicorn", "api.src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+  env:
+    - name: ENVIRONMENT
+      value: "production"
+    - name: DATABASE_URL
+      valueFrom:
+        secretKeyRef:
+          name: incidentiq-secrets
+          key: DATABASE_URL
+    - name: REDIS_URL
+      valueFrom:
+        secretKeyRef:
+          name: incidentiq-secrets
+          key: REDIS_URL
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+  livenessProbe:
+    httpGet:
+      path: /health/live
+      port: 8000
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health/ready
+      port: 8000
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 2
+
+# ── Worker Deployment ──────────────────────────────────────────────────────────
+worker:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/imtarget05/incidentiq-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  command: ["python", "-m", "api.src.etl_consumer"]
+  env:
+    - name: ENVIRONMENT
+      value: "production"
+    - name: DATABASE_URL
+      valueFrom:
+        secretKeyRef:
+          name: incidentiq-secrets
+          key: DATABASE_URL
+    - name: REDIS_URL
+      valueFrom:
+        secretKeyRef:
+          name: incidentiq-secrets
+          key: REDIS_URL
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Services ───────────────────────────────────────────────────────────────────
+service:
+  api:
+    enabled: true
+    type: ClusterIP
+    port: 80
+    targetPort: 8000
+    name: http
+  worker:
+    enabled: false
+
+# ── Ingress ────────────────────────────────────────────────────────────────────
+ingress:
+  enabled: false
+  className: nginx
+  hosts:
+    - host: incidentiq.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# ── Secret (template — giá trị thực qua ExternalSecrets / SOPS / env) ─────────
+secret:
+  enabled: true
+  mode: raw          # raw | sealed
+  stringData:
+    DATABASE_URL: "CHANGE_ME"
+    REDIS_URL: "CHANGE_ME"
+
+# ── SealedSecret (Bitnami SealedSecrets controller) ───────────────────────────
+sealedSecret:
+  enabled: false
+
+# ── Autoscaling ────────────────────────────────────────────────────────────────
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+# ── Redis (dev/staging tự cung cấp) ────────────────────────────────────────────
+redis:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+  containerPort: 6379
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Argo Rollouts (canary) ─────────────────────────────────────────────────────
+rollouts:
+  enabled: false
+  strategy: canary
+  maxUnavailable: 1
+  maxSurge: 1

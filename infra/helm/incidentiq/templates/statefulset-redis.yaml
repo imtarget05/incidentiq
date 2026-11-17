@@ -1,0 +1,47 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "incidentiq.fullname" . }}-redis
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "incidentiq.labels" . | nindent 4 }}
+    app: incidentiq-redis
+spec:
+  replicas: {{ .Values.redis.replicaCount }}
+  serviceName: {{ include "incidentiq.fullname" . }}-redis
+  selector:
+    matchLabels:
+      app: incidentiq-redis
+  template:
+    metadata:
+      labels:
+        app: incidentiq-redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+      - name: redis
+        image: {{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}
+        imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+        ports:
+        - name: redis
+          containerPort: {{ .Values.redis.containerPort }}
+        resources:
+          {{- toYaml .Values.redis.resources | nindent 10 }}
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+      volumes:
+      - name: data
+        emptyDir: {}
+{{- end }}

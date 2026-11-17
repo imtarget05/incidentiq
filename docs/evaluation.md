@@ -6,7 +6,7 @@ Insufficient-evidence cases: 10
 
 ## Retrieval metrics
 - Recall@5: 1.0
-- MRR (proxy): 0.5
+- Citation MRR@5: 1.0
 
 ## Answer metrics
 - Correctness (status + hypothesis): 1.0
@@ -16,5 +16,5 @@ Insufficient-evidence cases: 10
 - Hallucination rate (ok but no evidence): 0.0
 
 ## Method
-Ran 30 golden cases (20 sufficient, 10 insufficient) against a faked Cloudflare backend.
-No benchmark numbers were fabricated; all values are actual measured results.
+Ran 30 deterministic cases (20 sufficient, 10 insufficient) against faked D1, Vectorize, and AI backends.
+These scores are regression-harness results, not live retrieval or answer-quality estimates.

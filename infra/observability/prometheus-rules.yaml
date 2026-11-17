@@ -1,0 +1,27 @@
+groups:
+  - name: incidentiq-sli
+    rules:
+      - alert: IncidentIQHighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on IncidentIQ API"
+          description: "Error rate exceeds 5% over the last 5m."
+      - alert: IncidentIQHighLatencyP95
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p95 latency on IncidentIQ API"
+          description: "p95 latency exceeds 500ms over the last 10m."
+      - alert: IncidentIQApiDown
+        expr: up{job="incidentiq-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "IncidentIQ API is down"
+          description: "IncidentIQ API has been down for more than 2 minutes."

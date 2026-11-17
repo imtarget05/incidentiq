@@ -1,0 +1,39 @@
+# incidentiq — values production (override base)
+namespace: incidentiq-prod
+
+image:
+  tag: "sha-${GITHUB_SHA}"
+  pullPolicy: IfNotPresent
+
+api:
+  replicaCount: 2
+  env:
+    - name: ENVIRONMENT
+      value: "production"
+
+worker:
+  replicaCount: 2
+
+redis:
+  enabled: true
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+
+secret:
+  mode: sealed
+  stringData:
+    DATABASE_URL: "CHANGE_ME_PROD"
+    REDIS_URL: "CHANGE_ME_PROD_REDIS"
+
+sealedSecret:
+  enabled: true
+
+ingress:
+  enabled: true
+  tls:
+    - secretName: incidentiq-tls
+      hosts:
+        - incidentiq.example.com

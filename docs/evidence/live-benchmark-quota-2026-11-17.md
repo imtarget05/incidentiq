@@ -1,0 +1,5 @@
+# Preview benchmark limited by daily AI quota — 2026-11-17
+
+[Run 44100378336](https://github.com/imtarget05/incidentiq/actions/runs/44100378336) attempted all 30 synthetic cases with the resilient runner. The [raw report](live-benchmark-quota-2026-11-17.json) records 11 HTTP failures: one 503 during triage and ten HTTP 429 `ai_quota_exceeded` responses for cases `gc-21` through `gc-30`. The workflow correctly failed. It is **not a valid 30-case quality score** because the entire insufficient-evidence subset hit quota.
+
+The run shows a repeatable operational limit: repeated benchmark runs in one day consume the preview tenant's AI inference allowance. The summary's 0% abstention and 56.7% status accuracy are dominated by quota errors, not by model choices. Do not cite them as retrieval quality. The 20 sufficient cases include at least one 503, and the reported content recall@5 of 0.35 still includes that failure. The next quality run needs a fresh quota window or an isolated preview tenant with enough allocated quota, and the report must separate HTTP availability from quality among successful responses.

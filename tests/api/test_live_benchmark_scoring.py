@@ -50,6 +50,20 @@ def test_summary_reports_insufficient_evidence_separately():
     assert result["p95_latency_ms"] == 200
 
 
+def test_summary_separates_http_availability_from_quality():
+    case = {"id": "ok", "expected_status": "ok", "docs": [{"content": "OOMKilled runbook"}]}
+    success = score_case(case, {"status": "ok", "citations": [{"document_id": "doc"}],
+                                "evidence": [{"document_id": "doc", "quote": "OOMKilled runbook"}]},
+                         {"doc"}, 100)
+    unavailable = score_case({**case, "id": "error"}, {"status": "http_error"}, {"doc2"}, 200,
+                             http_status=429)
+    summary = summarize([success, unavailable])
+    assert summary["http_error_rate"] == 0.5
+    assert summary["retrieval_recall_at_5"] == 0.5
+    assert summary["available_sufficient_cases"] == 1
+    assert summary["available_retrieval_recall_at_5"] == 1.0
+
+
 def test_live_runner_uploads_waits_and_scores_actual_citation(monkeypatch, tmp_path):
     dataset = tmp_path / "dataset.json"
     dataset.write_text(json.dumps([{

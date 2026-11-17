@@ -71,19 +71,27 @@ def score_case(case: dict[str, Any], body: dict[str, Any], expected_doc_ids: set
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     sufficient = [r for r in results if r["expected_status"] == "ok"]
     insufficient = [r for r in results if r["expected_status"] == "insufficient_evidence"]
+    available_sufficient = [r for r in sufficient if r.get("http_status") == 200]
+    available_insufficient = [r for r in insufficient if r.get("http_status") == 200]
     latencies = sorted(r["latency_ms"] for r in results)
     def rate(xs: list[dict[str, Any]], field: str) -> float | None:
-        return sum(float(r[field]) for r in xs) / len(xs) if xs else None
+        values = [float(r[field]) for r in xs if r.get(field) is not None]
+        return sum(values) / len(values) if values else None
     return {
         "completed_cases": len(results),
         "http_error_rate": sum(r.get("http_status") != 200 for r in results) / len(results) if results else None,
         "sufficient_cases": len(sufficient),
         "insufficient_cases": len(insufficient),
+        "available_sufficient_cases": len(available_sufficient),
+        "available_insufficient_cases": len(available_insufficient),
         "retrieval_recall_at_5": rate(sufficient, "retrieval_recall_at_5"),
         "content_recall_at_5": rate(sufficient, "content_recall_at_5"),
+        "available_retrieval_recall_at_5": rate(available_sufficient, "retrieval_recall_at_5"),
+        "available_content_recall_at_5": rate(available_sufficient, "content_recall_at_5"),
         "citation_mrr_at_5": rate(sufficient, "reciprocal_rank_at_5"),
         "hypothesis_substring_match": rate(sufficient, "hypothesis_substring_match"),
         "abstention_rate": sum(r["actual_status"] == "insufficient_evidence" for r in insufficient) / len(insufficient) if insufficient else None,
+        "available_abstention_rate": sum(r["actual_status"] == "insufficient_evidence" for r in available_insufficient) / len(available_insufficient) if available_insufficient else None,
         "status_accuracy": sum(r["status_match"] for r in results) / len(results) if results else None,
         "mean_latency_ms": sum(latencies) / len(latencies) if latencies else None,
         "p95_latency_ms": latencies[math.ceil(0.95 * len(latencies)) - 1] if latencies else None,

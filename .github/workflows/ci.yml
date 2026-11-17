@@ -35,7 +35,7 @@ jobs:
           cache-dependency-path: api/requirements.txt
 
       - name: Install Python dependencies and quality tools
-        run: python -m pip install -r api/requirements.txt ruff pytest-cov
+        run: python -m pip install -r api/requirements.txt ruff pytest-cov requests
 
       - name: Install MCP dependencies
         run: npm ci

@@ -136,3 +136,40 @@ def test_live_runner_records_case_http_errors_and_continues(monkeypatch, tmp_pat
     assert len(report["results"]) == 2
     assert report["summary"]["http_error_rate"] == 0.5
     assert report["errors"] and "HTTP 503" in report["errors"][0]
+
+
+def test_live_runner_continues_after_incident_creation_failure(monkeypatch, tmp_path):
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([
+        {"id": "one", "incident": {"title": "one"}, "docs": [], "expected_status": "insufficient_evidence"},
+        {"id": "two", "incident": {"title": "two"}, "docs": [], "expected_status": "insufficient_evidence"},
+    ]), encoding="utf-8")
+
+    class Response:
+        def __init__(self, status, payload=None):
+            self.status_code, self.payload = status, payload or {}
+            self.text = "temporary failure" if status == 503 else ""
+
+        def json(self):
+            return self.payload
+
+    class Session:
+        def __init__(self):
+            self.headers = {}
+            self.creates = 0
+
+        def post(self, url, **_kwargs):
+            if url.endswith("/incidents"):
+                self.creates += 1
+                return Response(503) if self.creates == 1 else Response(201, {"incident_id": "second"})
+            if url.endswith("/triage"):
+                return Response(200, {"status": "insufficient_evidence", "citations": []})
+            raise AssertionError(url)
+
+    monkeypatch.setattr("eval.run_live_benchmark.requests.Session", Session)
+    report = run("https://incidentiq-preview.example.workers.dev", dataset, tmp_path / "report.json",
+                 "test-key", inter_case_delay=0)
+    assert report["complete"] is True
+    assert len(report["results"]) == 2
+    assert report["summary"]["http_error_rate"] == 0.5
+    assert report["errors"] and "create incident one" in report["errors"][0]

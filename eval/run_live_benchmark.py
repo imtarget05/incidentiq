@@ -31,7 +31,8 @@ DEFAULT_DATASET = HERE.parent / "data" / "rag_eval_dataset.json"
 DEFAULT_OUTPUT = HERE / "results" / "live_benchmark.json"
 
 
-def score_case(case: dict[str, Any], body: dict[str, Any], expected_doc_ids: set[str], latency_ms: int) -> dict[str, Any]:
+def score_case(case: dict[str, Any], body: dict[str, Any], expected_doc_ids: set[str], latency_ms: int,
+               http_status: int = 200) -> dict[str, Any]:
     citations = body.get("citations") or []
     observed = [str(c.get("document_id")) for c in citations[:5] if isinstance(c, dict)]
     matched = expected_doc_ids.intersection(observed)
@@ -40,6 +41,7 @@ def score_case(case: dict[str, Any], body: dict[str, Any], expected_doc_ids: set
     expected_text = case.get("expected_hypothesis_contains")
     return {
         "id": case["id"],
+        "http_status": http_status,
         "expected_status": case["expected_status"],
         "actual_status": body.get("status"),
         "status_match": body.get("status") == case["expected_status"],
@@ -48,6 +50,7 @@ def score_case(case: dict[str, Any], body: dict[str, Any], expected_doc_ids: set
         "retrieval_recall_at_5": len(matched) / len(expected_doc_ids) if expected_doc_ids else 0.0,
         "reciprocal_rank_at_5": 1.0 / rank if rank else 0.0,
         "hypothesis_substring_match": (expected_text.lower() in hypothesis_text.lower()) if expected_text else None,
+        "hypothesis_excerpt": hypothesis_text[:160],
         "latency_ms": latency_ms,
         "tokens_used": body.get("tokens_used"),
     }
@@ -60,6 +63,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     rate = lambda xs, field: sum(float(r[field]) for r in xs) / len(xs) if xs else None
     return {
         "completed_cases": len(results),
+        "http_error_rate": sum(r.get("http_status") != 200 for r in results) / len(results) if results else None,
         "sufficient_cases": len(sufficient),
         "insufficient_cases": len(insufficient),
         "retrieval_recall_at_5": rate(sufficient, "retrieval_recall_at_5"),
@@ -97,7 +101,8 @@ def wait_for_documents(session: requests.Session, base_url: str, ids: set[str], 
     raise TimeoutError(f"ETL did not process all {len(ids)} uploaded documents within {timeout_seconds}s")
 
 
-def run(base_url: str, dataset_path: Path, output: Path, api_key: str, wait_seconds: int = 180) -> dict[str, Any]:
+def run(base_url: str, dataset_path: Path, output: Path, api_key: str, wait_seconds: int = 180,
+        inter_case_delay: float = 2.0) -> dict[str, Any]:
     parsed = urlparse(base_url)
     if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}):
         raise ValueError("Use HTTPS for remote APIs; HTTP is allowed only on localhost")
@@ -116,7 +121,8 @@ def run(base_url: str, dataset_path: Path, output: Path, api_key: str, wait_seco
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "base_url": base_url, "dataset": str(dataset_path), "dataset_sha256": dataset_hash,
         "git_sha": os.getenv("GITHUB_SHA", "local-unrecorded"),
-        "method": "Upload synthetic documents, wait for ETL, create incidents, call triage; score citations by uploaded document ID. Hypothesis score is substring matching, not semantic grading.",
+        "method": "Upload synthetic documents, wait for ETL, create incidents, call triage; score citations by uploaded document ID. Hypothesis score is substring matching, not semantic grading. HTTP errors are counted, not silently scored as retrieval misses.",
+        "inter_case_delay_seconds": inter_case_delay,
         "results": [], "errors": [], "complete": False,
     }
     uploaded: dict[str, set[str]] = {}
@@ -142,7 +148,7 @@ def run(base_url: str, dataset_path: Path, output: Path, api_key: str, wait_seco
         if all_ids:
             wait_for_documents(session, base_url, all_ids, wait_seconds)
 
-        for case in cases:
+        for case_index, case in enumerate(cases):
             incident = dict(case["incident"])
             response = session.post(
                 f"{base_url}/api/v1/incidents", json=incident,
@@ -153,10 +159,20 @@ def run(base_url: str, dataset_path: Path, output: Path, api_key: str, wait_seco
             if not incident_id:
                 raise RuntimeError(f"create incident {case['id']}: missing incident_id")
             start = time.monotonic()
-            response = session.post(f"{base_url}/api/v1/incidents/{incident_id}/triage", json={}, timeout=90)
-            latency_ms = round((time.monotonic() - start) * 1000)
-            body = require_response(response, 200, f"triage {case['id']}")
-            result["results"].append(score_case(case, body, uploaded[case["id"]], latency_ms))
+            response = None
+            try:
+                response = session.post(f"{base_url}/api/v1/incidents/{incident_id}/triage", json={}, timeout=90)
+                latency_ms = round((time.monotonic() - start) * 1000)
+                body = require_response(response, 200, f"triage {case['id']}")
+                result["results"].append(score_case(case, body, uploaded[case["id"]], latency_ms))
+            except (requests.RequestException, RuntimeError) as exc:
+                latency_ms = round((time.monotonic() - start) * 1000)
+                status_code = response.status_code if response is not None else 0
+                result["errors"].append(str(exc))
+                result["results"].append(score_case(case, {"status": "http_error"}, uploaded[case["id"]],
+                                                    latency_ms, http_status=status_code))
+            if case_index + 1 < len(cases) and inter_case_delay > 0:
+                time.sleep(inter_case_delay)
         result["complete"] = True
     except (requests.RequestException, RuntimeError, TimeoutError, ValueError) as exc:
         result["errors"].append(str(exc))
@@ -175,10 +191,12 @@ def main() -> int:
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--wait-seconds", type=int, default=180)
+    parser.add_argument("--inter-case-delay", type=float, default=2.0)
     args = parser.parse_args()
-    report = run(args.base_url, args.dataset, args.output, os.getenv("EVAL_API_KEY", ""), args.wait_seconds)
+    report = run(args.base_url, args.dataset, args.output, os.getenv("EVAL_API_KEY", ""),
+                 args.wait_seconds, args.inter_case_delay)
     print(json.dumps(report["summary"], indent=2))
-    return 0
+    return 1 if report["errors"] else 0
 
 
 if __name__ == "__main__":

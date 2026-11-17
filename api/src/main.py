@@ -1150,12 +1150,21 @@ async def _store_triage_report(env: Any, incident_id: str, tenant_id: str, statu
            json.dumps(read_only_checks), json.dumps(citations), _now_ms()).run()
 
 
-async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5,
+                         keyword_query: str | None = None) -> list[dict[str, Any]]:
     """Hybrid retrieval: Vectorize semantic + D1 FTS5 keyword, merged and re-ranked.
     Both paths are tenant-isolated. Failures in one path do not fail the other.
     """
     results: list[dict[str, Any]] = []
     seen: set = set()
+    title_tokens = {token.lower() for token in re.findall(r"[A-Za-z0-9]+", keyword_query or "")}
+
+    def relevant(content: str) -> bool:
+        if not title_tokens:
+            return True
+        content_tokens = {token.lower() for token in re.findall(r"[A-Za-z0-9]+", content)}
+        overlap = title_tokens & content_tokens
+        return len(overlap) >= 2 or any(len(token) >= 8 for token in overlap)
 
     # 1. Vectorize semantic search (tenant-isolated via metadata filter).
     question_vector: list[float] | None = None
@@ -1176,6 +1185,8 @@ async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -
             for m in matches:
                 meta = m.get("metadata", {}) or {}
                 doc_id = meta.get("document_id")
+                if not doc_id or not relevant(meta.get("content", "")):
+                    continue
                 key = f"vec:{doc_id}:{meta.get('chunk_id')}"
                 if key in seen:
                     continue
@@ -1193,13 +1204,17 @@ async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -
 
     # 2. D1 FTS5 keyword search (tenant-isolated via join to documents).
     try:
+        fts_query = " OR ".join(f'"{token}"' for token in sorted(title_tokens)) if title_tokens else query
         fts_rows = await _db_all(env.DB.prepare(
             "SELECT d.id, d.filename, d.content, bm25(documents_fts) AS rank "
             "FROM documents_fts JOIN documents d ON d.rowid = documents_fts.rowid "
             "WHERE documents_fts MATCH ? AND d.tenant_id = ? ORDER BY rank LIMIT ?"
-        ).bind(query, tenant_id, top_k))
+        ).bind(fts_query, tenant_id, top_k))
         for r in fts_rows or []:
             doc_id = r[0] if not isinstance(r, dict) else r.get("id")
+            content = r[2] if not isinstance(r, dict) else r.get("content")
+            if not doc_id or not relevant(content or ""):
+                continue
             key = f"fts:{doc_id}"
             if key in seen:
                 continue
@@ -1208,7 +1223,7 @@ async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -
             results.append({
                 "document_id": doc_id,
                 "chunk_id": None,
-                "content": r[2] if not isinstance(r, dict) else r.get("content"),
+                "content": content,
                 "score": 1.0 / (1.0 + float(rank or 0)),
                 "version": 1,
                 "source": "keyword",
@@ -1216,8 +1231,14 @@ async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5) -
     except Exception:
         pass
 
-    results.sort(key=lambda x: (0 if x["source"] == "vector" else 1, -x["score"]))
-    return results[:top_k]
+    results.sort(key=lambda x: (0 if x["source"] == "keyword" else 1, -x["score"]))
+    unique: list[dict[str, Any]] = []
+    seen_docs: set[str] = set()
+    for result in results:
+        if result["document_id"] not in seen_docs:
+            unique.append(result)
+            seen_docs.add(result["document_id"])
+    return unique[:top_k]
 
 
 async def _similar_incidents(env: Any, tenant_id: str, incident_id: str,
@@ -1273,7 +1294,7 @@ async def triage_incident(incident_id: str, request: Request,
     query = f"{title} {service} {environment} {logs_hint}".strip()
 
     # Hybrid retrieval.
-    context_chunks = await _hybrid_search(env, tenant_id, query)
+    context_chunks = await _hybrid_search(env, tenant_id, query, keyword_query=title)
 
     citations: list[dict[str, Any]] = []
     context_parts: list[str] = []

@@ -164,17 +164,17 @@ def run(base_url: str, dataset_path: Path, output: Path, api_key: str, wait_seco
 
         for case_index, case in enumerate(cases):
             incident = dict(case["incident"])
-            response = session.post(
-                f"{base_url}/api/v1/incidents", json=incident,
-                headers={"Idempotency-Key": f"{run_id}-incident-{case['id']}"}, timeout=30,
-            )
-            payload = require_response(response, 201, f"create incident {case['id']}")
-            incident_id = payload.get("incident_id")
-            if not incident_id:
-                raise RuntimeError(f"create incident {case['id']}: missing incident_id")
             start = time.monotonic()
             response = None
             try:
+                response = session.post(
+                    f"{base_url}/api/v1/incidents", json=incident,
+                    headers={"Idempotency-Key": f"{run_id}-incident-{case['id']}"}, timeout=30,
+                )
+                payload = require_response(response, 201, f"create incident {case['id']}")
+                incident_id = payload.get("incident_id")
+                if not incident_id:
+                    raise RuntimeError(f"create incident {case['id']}: missing incident_id")
                 response = session.post(f"{base_url}/api/v1/incidents/{incident_id}/triage", json={}, timeout=90)
                 latency_ms = round((time.monotonic() - start) * 1000)
                 body = require_response(response, 200, f"triage {case['id']}")

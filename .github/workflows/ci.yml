@@ -80,6 +80,11 @@ jobs:
           test -n "$SONAR_HOST_URL" || { echo "SONAR_HOST_URL repository variable is required" >&2; exit 1; }
           test -n "$SONAR_TOKEN" || { echo "SONAR_TOKEN repository secret is required" >&2; exit 1; }
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: SonarQube analysis and quality gate
         uses: SonarSource/sonarqube-scan-action@v8.3.0
         env:
@@ -89,6 +94,7 @@ jobs:
           args: >
             -Dsonar.projectKey=imtarget05_incidentiq
             -Dsonar.organization=imtarget05
+            -Dsonar.scanner.skipJreProvisioning=true
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
             -Dsonar.python.coverage.reportPaths=coverage.xml

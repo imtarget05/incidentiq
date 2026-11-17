@@ -85,3 +85,45 @@ def test_live_runner_uploads_waits_and_scores_actual_citation(monkeypatch, tmp_p
     assert report["complete"] is True
     assert report["summary"]["retrieval_recall_at_5"] == 1.0
     assert json.loads(output.read_text())["dataset_sha256"]
+
+
+def test_live_runner_records_case_http_errors_and_continues(monkeypatch, tmp_path):
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([
+        {"id": "gc-01", "incident": {"title": "one"}, "docs": [],
+         "expected_status": "insufficient_evidence", "expected_hypothesis_contains": None},
+        {"id": "gc-02", "incident": {"title": "two"}, "docs": [],
+         "expected_status": "insufficient_evidence", "expected_hypothesis_contains": None},
+    ]), encoding="utf-8")
+
+    class Response:
+        def __init__(self, status, payload=None):
+            self.status_code = status
+            self.payload = payload or {}
+            self.text = "temporary failure" if status == 503 else ""
+
+        def json(self):
+            return self.payload
+
+    class Session:
+        def __init__(self):
+            self.headers = {}
+            self.triage_calls = 0
+
+        def post(self, url, **kwargs):
+            if url.endswith("/incidents"):
+                return Response(201, {"incident_id": kwargs["headers"]["Idempotency-Key"]})
+            if url.endswith("/triage"):
+                self.triage_calls += 1
+                if self.triage_calls == 1:
+                    return Response(503)
+                return Response(200, {"status": "insufficient_evidence", "citations": [], "hypotheses": []})
+            raise AssertionError(url)
+
+    monkeypatch.setattr("eval.run_live_benchmark.requests.Session", Session)
+    output = tmp_path / "result.json"
+    report = run("https://incidentiq-preview.example.workers.dev", dataset, output, "test-key", inter_case_delay=0)
+    assert report["complete"] is True
+    assert len(report["results"]) == 2
+    assert report["summary"]["http_error_rate"] == 0.5
+    assert report["errors"] and "HTTP 503" in report["errors"][0]

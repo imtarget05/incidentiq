@@ -24,6 +24,15 @@ def test_missing_evidence_cannot_score_as_success():
     assert scored["status_match"] is False
 
 
+def test_content_match_distinguishes_duplicate_runbook_from_fresh_upload():
+    case = {"id": "gc-01", "expected_status": "ok", "docs": [{"content": "OOMKilled: check memory limit."}]}
+    body = {"status": "ok", "citations": [{"document_id": "older-copy"}],
+            "evidence": [{"document_id": "older-copy", "quote": "OOMKilled: check memory limit."}]}
+    scored = score_case(case, body, {"fresh-upload"}, 100)
+    assert scored["retrieval_recall_at_5"] == 0.0
+    assert scored["content_recall_at_5"] == 1.0
+
+
 def test_summary_reports_insufficient_evidence_separately():
     sufficient = score_case(
         {"id": "gc-01", "expected_status": "ok", "expected_hypothesis_contains": "memory limit"},

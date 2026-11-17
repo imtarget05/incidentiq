@@ -1,13 +1,16 @@
 # IncidentIQ — Document-Grounded Incident Triage
 
-IncidentIQ is a backend engineering project for retrieving operational knowledge during incident triage. It combines a Python API, document ingestion, hybrid retrieval, and a TypeScript tool endpoint. The implementation targets Cloudflare Workers and managed data services; repository configuration is not proof of a production deployment.
+[![CI](https://github.com/imtarget05/incidentiq/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/imtarget05/incidentiq/actions)
+[![Eval & Regression](https://github.com/imtarget05/incidentiq/actions/workflows/eval.yml/badge.svg?branch=main)](https://github.com/imtarget05/incidentiq/actions)
+
+IncidentIQ is a backend engineering project for retrieving operational knowledge during incident triage. It combines a Python API, document ingestion, hybrid retrieval, and a TypeScript tool endpoint. The implementation targets Cloudflare Workers and managed data services.
 
 ## At a glance
 
 - **Problem:** incident responders need relevant runbook and document context alongside incident details.
 - **Architecture:** FastAPI-compatible Python Worker API, D1 metadata and full-text search, Workers AI embeddings, optional Vectorize, ETL consumer, and a TypeScript MCP-style endpoint.
 - **Retrieval:** lexical search and vector search are combined where configured; the code also includes fallback paths.
-- **Current evidence:** the PR #2 hosted CI run passes Python tests with coverage, MCP tests and typecheck, dependency audit, Trivy, and the SonarCloud quality gate. The API Worker also starts locally through `pywrangler` and returns 200 from both health endpoints.
+- **Current evidence:** the CI pipeline on `main` passes Python tests with coverage, MCP tests and typecheck, dependency audit, Syft SBOM generation, Gitleaks secrets audit, Trivy security scan, and evaluation regression suites. The API Worker also starts locally through `pywrangler` and returns 200 from both health endpoints.
 - **Readiness:** production readiness is not established. Evaluation fixtures use fake backends; they do not establish live retrieval quality, latency, or cost.
 
 ## Architecture and request flow

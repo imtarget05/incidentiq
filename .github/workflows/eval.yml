@@ -7,10 +7,11 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      base_url:
-        description: "Live IncidentIQ API base URL (fixture job always uses fakes)"
-        required: false
-        default: ""
+      run_live_benchmark:
+        description: "Seed synthetic cases and measure the fixed preview API"
+        type: boolean
+        required: true
+        default: false
 
 jobs:
   fixture-smoke:
@@ -36,7 +37,7 @@ jobs:
 
   live-benchmark:
     name: "Live Retrieval & LLM Benchmark"
-    if: ${{ inputs.base_url != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_benchmark == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -48,10 +49,12 @@ jobs:
         run: pip install requests
       - name: Run live benchmark
         env:
-          BASE_URL: ${{ inputs.base_url }}
+          BASE_URL: https://incidentiq-preview.tanmainguyenbinh.workers.dev
+          EVAL_API_KEY: ${{ secrets.PREVIEW_SMOKE_API_KEY }}
         run: |
+          test -n "$EVAL_API_KEY" || { echo "PREVIEW_SMOKE_API_KEY is required" >&2; exit 1; }
           python eval/run_live_benchmark.py --base-url "$BASE_URL" \
-            --questions eval/golden_dataset.json \
+            --dataset data/rag_eval_dataset.json \
             --output eval/results/live_benchmark.json
       - name: Upload live benchmark report
         if: always()

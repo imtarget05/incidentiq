@@ -21,6 +21,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
       containers:
       - name: worker
         image: {{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}
@@ -29,6 +34,10 @@ spec:
         env:
         - name: ENVIRONMENT
           value: "production"
+        - name: PYTHONDONTWRITEBYTECODE
+          value: "1"
+        - name: TMPDIR
+          value: /tmp
         {{- range .Values.worker.env }}
         - name: {{ .name }}
           {{- if .valueFrom }}
@@ -40,4 +49,16 @@ spec:
         {{- end }}
         resources:
           {{- toYaml .Values.worker.resources | nindent 10 }}
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+      volumes:
+      - name: tmp
+        emptyDir: {}
 {{- end }}

@@ -58,22 +58,28 @@ resource "azurerm_subnet" "aks" {
 
 # ── AKS Cluster (3 node, 1 replica/service để fit node capacity) ─────────────
 resource "azurerm_kubernetes_cluster" "main" {
-  name                = "aks-incidentiq-${random_string.suffix.result}"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.main.name
-  dns_prefix          = var.dns_prefix
+  name                              = "aks-incidentiq-${random_string.suffix.result}"
+  location                          = var.location
+  resource_group_name               = azurerm_resource_group.main.name
+  dns_prefix                        = var.dns_prefix
+  role_based_access_control_enabled = true
+
+  api_server_access_profile {
+    authorized_ip_ranges = var.aks_api_authorized_ip_ranges
+  }
 
   default_node_pool {
-    name               = "agentpool"
-    vm_size            = var.vm_size
-    node_count         = 3
-    vnet_subnet_id     = azurerm_subnet.aks.id
+    name                = "agentpool"
+    vm_size             = var.vm_size
+    node_count          = 3
+    vnet_subnet_id      = azurerm_subnet.aks.id
     enable_auto_scaling = false
-    max_pods           = 30
+    max_pods            = 30
   }
 
   network_profile {
-    network_plugin   = "azure"
+    network_plugin    = "azure"
+    network_policy    = "azure"
     load_balancer_sku = "standard"
   }
 
@@ -86,27 +92,27 @@ resource "azurerm_kubernetes_cluster" "main" {
 
 # ── Azure Database for PostgreSQL Flexible Server ─────────────────────────────
 resource "azurerm_postgresql_flexible_server" "main" {
-  name                = "pg-incidentiq-${random_string.suffix.result}"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.main.name
-  administrator_login = var.pg_admin_user
-  sku_name             = var.pg_sku
-  storage_mb           = var.pg_storage_mb
+  name                  = "pg-incidentiq-${random_string.suffix.result}"
+  location              = var.location
+  resource_group_name   = azurerm_resource_group.main.name
+  administrator_login   = var.pg_admin_user
+  sku_name              = var.pg_sku
+  storage_mb            = var.pg_storage_mb
   backup_retention_days = var.pg_backup_retention_days
-  tags = var.common_tags
+  tags                  = var.common_tags
 }
 
 # ── Azure Cache for Redis ─────────────────────────────────────────────────────
 resource "azurerm_redis_cache" "main" {
-  name                = "redis-incidentiq-${random_string.suffix.result}"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.main.name
-  capacity            = 1
-  family              = "C"
-  sku_name            = "Basic"
+  name                 = "redis-incidentiq-${random_string.suffix.result}"
+  location             = var.location
+  resource_group_name  = azurerm_resource_group.main.name
+  capacity             = 1
+  family               = "C"
+  sku_name             = "Basic"
   non_ssl_port_enabled = false
-  minimum_tls_version = "1.2"
-  tags                = var.common_tags
+  minimum_tls_version  = "1.2"
+  tags                 = var.common_tags
 }
 
 # ── Azure Storage Account (object storage, backup artifacts) ──────────────────
@@ -116,7 +122,12 @@ resource "azurerm_storage_account" "main" {
   location                 = var.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
-  tags                     = var.common_tags
+  network_rules {
+    default_action             = "Deny"
+    virtual_network_subnet_ids = [azurerm_subnet.aks.id]
+    bypass                     = ["AzureServices"]
+  }
+  tags = var.common_tags
 }
 
 resource "azurerm_storage_container" "backups" {

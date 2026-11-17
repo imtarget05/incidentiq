@@ -41,6 +41,10 @@ spec:
         env:
         - name: ENVIRONMENT
           value: "production"
+        - name: PYTHONDONTWRITEBYTECODE
+          value: "1"
+        - name: TMPDIR
+          value: /tmp
         {{- range .Values.api.env }}
         - name: {{ .name }}
           {{- if .valueFrom }}
@@ -68,10 +72,16 @@ spec:
           failureThreshold: 3
         resources:
           {{- toYaml .Values.api.resources | nindent 10 }}
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         securityContext:
           allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop:
               - ALL
+      volumes:
+      - name: tmp
+        emptyDir: {}
 {{- end }}

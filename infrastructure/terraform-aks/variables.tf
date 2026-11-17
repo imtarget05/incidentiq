@@ -16,6 +16,16 @@ variable "dns_prefix" {
   default     = "incidentiq"
 }
 
+variable "aks_api_authorized_ip_ranges" {
+  description = "Operator CIDR ranges allowed to access the AKS API; supply explicitly per environment"
+  type        = list(string)
+
+  validation {
+    condition     = length(var.aks_api_authorized_ip_ranges) > 0 && alltrue([for cidr in var.aks_api_authorized_ip_ranges : can(cidrhost(cidr, 0)) && cidr != "0.0.0.0/0"])
+    error_message = "Provide at least one valid, restricted IPv4 CIDR; 0.0.0.0/0 is not allowed."
+  }
+}
+
 variable "vm_size" {
   description = "Kích thước VM node pool AKS"
   type        = string
@@ -26,8 +36,8 @@ variable "common_tags" {
   description = "Tags gắn mọi tài nguyên"
   type        = map(string)
   default = {
-    project   = "incidentiq"
-    owner     = "platform"
+    project     = "incidentiq"
+    owner       = "platform"
     environment = "dev"
   }
 }

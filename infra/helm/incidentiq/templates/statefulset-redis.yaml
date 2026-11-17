@@ -18,6 +18,11 @@ spec:
       labels:
         app: incidentiq-redis
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
       containers:
       - name: redis
         image: {{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}
@@ -27,4 +32,16 @@ spec:
           containerPort: {{ .Values.redis.containerPort }}
         resources:
           {{- toYaml .Values.redis.resources | nindent 10 }}
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+      volumes:
+      - name: data
+        emptyDir: {}
 {{- end }}

@@ -30,10 +30,13 @@ class FakeVectorize:
     def __init__(self, matches=None):
         self.matches = matches or []
 
-    async def query(self, vector=None, topK=None, returnMetadata=None, filter=None):
-        tenant_id = (filter or {}).get("tenant_id")
+    async def query(self, vector=None, options=None, **kwargs):
+        # Cloudflare Vectorize receives one options object as the second arg.
+        # Preserve keyword options for older test call sites.
+        opts = {**(options or {}), **kwargs}
+        tenant_id = (opts.get("filter") or {}).get("tenant_id")
         out = [m for m in self.matches if not tenant_id or m.get("metadata", {}).get("tenant_id") == tenant_id]
-        return {"matches": out[: topK or len(out)]}
+        return {"matches": out[: opts.get("topK") or len(out)]}
 
 
 class FakeAI:
@@ -373,6 +376,15 @@ def run_case(client, env, case: Dict[str, Any]) -> Dict[str, Any]:
 
 # --------------------------------------------------------------------------- metrics
 
+def score_citations(citations: List[Dict[str, Any]], expected_doc_ids: set[str], top_k: int = 5) -> tuple[float, float]:
+    """Return document recall and reciprocal rank from observed citations."""
+    if not expected_doc_ids:
+        return 0.0, 0.0
+    observed = [str(c.get("document_id")) for c in citations[:top_k]]
+    found = expected_doc_ids.intersection(observed)
+    first_rank = next((rank for rank, doc_id in enumerate(observed, 1) if doc_id in expected_doc_ids), None)
+    return len(found) / len(expected_doc_ids), 1.0 / first_rank if first_rank else 0.0
+
 def evaluate(cases, client, env) -> Dict[str, Any]:
     results: List[Dict[str, Any]] = []
     for case in cases:
@@ -380,11 +392,13 @@ def evaluate(cases, client, env) -> Dict[str, Any]:
         expected_status = case["expected_status"]
         status_ok = body["status"] == expected_status
         citations = body.get("citations", [])
+        expected_doc_ids = {str(doc["id"]) for doc in case["docs"]}
+        citation_recall, reciprocal_rank = score_citations(citations, expected_doc_ids)
         evidence = body.get("evidence", [])
         hypothesis = " ".join(h.get("text", "") for h in body.get("hypotheses", []))
         hyp_match = (case["expected_hypothesis_contains"] is None
                      or case["expected_hypothesis_contains"].lower() in hypothesis.lower())
-        citation_valid = all(c.get("document_id") for c in citations)
+        citation_valid = bool(citations) and all(c.get("document_id") for c in citations)
         results.append({
             "id": case["id"],
             "expected_status": expected_status,
@@ -393,6 +407,8 @@ def evaluate(cases, client, env) -> Dict[str, Any]:
             "citation_count": len(citations),
             "evidence_count": len(evidence),
             "citation_valid": citation_valid,
+            "citation_recall": citation_recall,
+            "reciprocal_rank": reciprocal_rank,
             "hypothesis_match": hyp_match,
             "hypothesis": hypothesis[:120],
         })
@@ -401,10 +417,10 @@ def evaluate(cases, client, env) -> Dict[str, Any]:
     sufficient = [r for r in results if r["expected_status"] == "ok"]
     insufficient = [r for r in results if r["expected_status"] == "insufficient_evidence"]
 
-    recall_at_5 = sum(1 for r in sufficient if r["citation_count"] > 0) / max(1, len(sufficient))
-    mrr = sum(1 / (r["citation_count"] + 1) for r in sufficient) / max(1, len(sufficient))  # proxy
+    recall_at_5 = sum(r["citation_recall"] for r in sufficient) / max(1, len(sufficient))
+    mrr = sum(r["reciprocal_rank"] for r in sufficient) / max(1, len(sufficient))
     correctness = sum(1 for r in results if r["status_ok"] and r["hypothesis_match"]) / max(1, n)
-    citation_validity = sum(1 for r in results if r["citation_valid"]) / max(1, n)
+    citation_validity = sum(1 for r in sufficient if r["citation_valid"]) / max(1, len(sufficient))
     groundedness = sum(1 for r in sufficient if r["evidence_count"] > 0) / max(1, len(sufficient))
     abstention_rate = sum(1 for r in insufficient if r["actual_status"] == "insufficient_evidence") / max(1, len(insufficient))
     hallucination_rate = sum(1 for r in results if r["actual_status"] == "ok" and r["evidence_count"] == 0) / max(1, n)
@@ -414,7 +430,7 @@ def evaluate(cases, client, env) -> Dict[str, Any]:
         "sufficient": len(sufficient),
         "insufficient": len(insufficient),
         "recall_at_5": round(recall_at_5, 3),
-        "mrr_proxy": round(mrr, 3),
+        "mrr_at_5": round(mrr, 3),
         "correctness": round(correctness, 3),
         "citation_validity": round(citation_validity, 3),
         "groundedness": round(groundedness, 3),
@@ -475,13 +491,15 @@ def main_eval(live_url: str | None, dataset_path: str | None = None) -> None:
         _set_env(env)
         client = TestClient(main.app)
         metrics = evaluate(cases, client, env)
+        for metric_name in ("recall_at_5", "mrr_at_5", "correctness", "groundedness", "abstention_rate"):
+            assert metrics[metric_name] == 1.0, f"Fake-backed regression failed: {metric_name}={metrics[metric_name]}"
 
         # Record evaluation metrics into datamart (rag_eval_runs table)
         import asyncio
         async def _save_eval():
             for metric_name, val in [
                 ("recall@5", metrics.get("recall_at_5", 0.0)),
-                ("mrr", metrics.get("mrr_proxy", 0.0)),
+                ("mrr", metrics.get("mrr_at_5", 0.0)),
                 ("correctness", metrics.get("correctness", 0.0)),
                 ("faithfulness", metrics.get("citation_validity", 0.0)),
             ]:
@@ -506,7 +524,7 @@ def main_eval(live_url: str | None, dataset_path: str | None = None) -> None:
         "",
         "## Retrieval metrics",
         f"- Recall@5: {metrics.get('recall_at_5', 'n/a')}",
-        f"- MRR (proxy): {metrics.get('mrr_proxy', 'n/a')}",
+        f"- Citation MRR@5: {metrics.get('mrr_at_5', 'n/a')}",
         "",
         "## Answer metrics",
         f"- Correctness (status + hypothesis): {metrics.get('correctness', 'n/a')}",
@@ -516,8 +534,8 @@ def main_eval(live_url: str | None, dataset_path: str | None = None) -> None:
         f"- Hallucination rate (ok but no evidence): {metrics.get('hallucination_rate', 'n/a')}",
         "",
         "## Method",
-        "Ran 30 golden cases (20 sufficient, 10 insufficient) against a faked Cloudflare backend.",
-        "No benchmark numbers were fabricated; all values are actual measured results.",
+        "Ran 30 deterministic cases (20 sufficient, 10 insufficient) against faked D1, Vectorize, and AI backends.",
+        "These scores are regression-harness results, not live retrieval or answer-quality estimates.",
     ]
     with open("docs/evaluation.md", "w") as f:
         f.write("\n".join(lines) + "\n")

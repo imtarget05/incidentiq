@@ -1208,7 +1208,8 @@ async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5,
         fts_rows = await _db_all(env.DB.prepare(
             "SELECT d.id, d.filename, d.content, bm25(documents_fts) AS rank "
             "FROM documents_fts JOIN documents d ON d.rowid = documents_fts.rowid "
-            "WHERE documents_fts MATCH ? AND d.tenant_id = ? ORDER BY rank LIMIT ?"
+            "WHERE documents_fts MATCH ? AND d.tenant_id = ? "
+            "ORDER BY rank ASC, d.uploaded_at DESC LIMIT ?"
         ).bind(fts_query, tenant_id, top_k))
         for r in fts_rows or []:
             doc_id = r[0] if not isinstance(r, dict) else r.get("id")
@@ -1224,7 +1225,9 @@ async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5,
                 "document_id": doc_id,
                 "chunk_id": None,
                 "content": content,
-                "score": 1.0 / (1.0 + float(rank or 0)),
+                # FTS5 bm25() returns lower (usually negative) scores for
+                # stronger matches. Negating keeps the API score monotonic.
+                "score": -float(rank or 0),
                 "version": 1,
                 "source": "keyword",
             })

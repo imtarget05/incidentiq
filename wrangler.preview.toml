@@ -26,7 +26,7 @@ queue = "etl-dlq-preview"
 directory = "./web"
 binding = "ASSETS"
 not_found_handling = "none"
-run_worker_first = true
+run_worker_first = ["/api/*", "/health*"]
 
 [observability]
 enabled = true

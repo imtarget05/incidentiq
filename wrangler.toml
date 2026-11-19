@@ -21,13 +21,13 @@ queue = "etl-queue"
 binding = "ETL_DLQ"
 queue = "etl-dlq"
 
-# Static dashboard assets. Requests to /api/* and /health go to the Worker first;
-# everything else is served from ./web.
+# Static dashboard assets. Route API and health to Python; let Cloudflare serve
+# the browser assets directly rather than returning FastAPI's 404 for /.
 [assets]
 directory = "./web"
 binding = "ASSETS"
 not_found_handling = "none"
-run_worker_first = true
+run_worker_first = ["/api/*", "/health*"]
 
 [observability]
 enabled = true

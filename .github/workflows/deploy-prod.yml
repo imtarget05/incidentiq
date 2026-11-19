@@ -116,6 +116,13 @@ jobs:
           curl --fail --silent --show-error --max-time 15 "$PROD_API_WORKER_URL/health/ready" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("status") in ("ok","degraded"), d'
           echo "Health endpoints verified."
 
+      - name: Verify browser assets at the public edge
+        run: |
+          html=$(curl --fail --silent --show-error --max-time 15 "$PROD_API_WORKER_URL/")
+          [[ "$html" == *'<title>IncidentIQ — AI Knowledge Platform</title>'* ]]
+          javascript=$(curl --fail --silent --show-error --max-time 15 "$PROD_API_WORKER_URL/app.js")
+          [[ "$javascript" == *'/api/v1/'* ]]
+
       - name: Collect deploy evidence
         run: |
           mkdir -p deploy-evidence

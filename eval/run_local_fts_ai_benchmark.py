@@ -116,11 +116,14 @@ def seed(db: LocalDB, cases: list[dict[str, Any]], api_key: str) -> None:
     db.conn.commit()
 
 
-def run(account_id: str, token: str, dataset: Path, output: Path, limit: int | None = None) -> dict[str, Any]:
+def run(account_id: str, token: str, dataset: Path, output: Path, limit: int | None = None,
+        case_id: str | None = None) -> dict[str, Any]:
     cases = json.loads(dataset.read_text(encoding="utf-8"))
     if not isinstance(cases, list) or not cases:
         raise ValueError("Dataset must contain at least one case")
-    selected = cases[:limit] if limit else cases
+    selected = [case for case in cases if case["id"] == case_id] if case_id else (cases[:limit] if limit else cases)
+    if not selected:
+        raise ValueError(f"No case matches {case_id}")
     db = LocalDB()
     api_key = "sk-local-benchmark-" + os.urandom(12).hex()
     seed(db, cases, api_key)
@@ -138,7 +141,7 @@ def run(account_id: str, token: str, dataset: Path, output: Path, limit: int | N
         "git_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "working_tree_dirty": bool(subprocess.check_output(
             ["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
-        "model": "@cf/openai/gpt-oss-20b", "max_tokens": 1024,
+        "model": "@cf/openai/gpt-oss-20b", "max_tokens": 1536,
         "scope": "Real FastAPI triage route, in-memory SQLite migrations and FTS5, live Cloudflare Workers AI. "
                  "All dataset documents preseeded; Vectorize and ETL excluded. Synthetic cases only.",
         "results": [], "errors": [], "complete": False,
@@ -189,13 +192,14 @@ def main() -> int:
     parser.add_argument("--wrangler-oauth-config", type=Path,
                         help="Optional local Wrangler config; its token is read but never included in the report")
     parser.add_argument("--limit", type=int, help="Run only the first N cases for a smoke test")
+    parser.add_argument("--case-id", help="Run one case while keeping the full corpus seeded")
     args = parser.parse_args()
     token = os.getenv("CLOUDFLARE_API_TOKEN", "")
     if args.wrangler_oauth_config:
         token = tomllib.loads(args.wrangler_oauth_config.read_text(encoding="utf-8"))["oauth_token"]
     if not args.account_id or not token:
         parser.error("Cloudflare account ID and API token (or Wrangler OAuth config) are required")
-    report = run(args.account_id, token, args.dataset, args.output, args.limit)
+    report = run(args.account_id, token, args.dataset, args.output, args.limit, args.case_id)
     print(json.dumps(report["summary"], indent=2))
     return 1 if report["errors"] else 0
 

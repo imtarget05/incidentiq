@@ -295,7 +295,7 @@ def test_triage_grounded_with_citations(monkeypatch):
     # similar incidents: none for t1 payment-api (only one incident)
     assert body["similar_incidents"] == []
     generation_calls = [inputs for model, inputs in env.ai.calls if model == "@cf/openai/gpt-oss-20b"]
-    assert generation_calls[0]["max_tokens"] == 1024
+    assert generation_calls[0]["max_tokens"] == 1536
     saved = client.get(f"/api/v1/incidents/{inc_id}/report", headers=h)
     assert saved.status_code == 200
     assert saved.json()["summary"] == body["summary"]

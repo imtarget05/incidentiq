@@ -1359,7 +1359,7 @@ async def triage_incident(incident_id: str, request: Request,
                 {"role": "system", "content": TRIAGE_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
-            "max_tokens": 1024,
+            "max_tokens": 1536,
         })
         answer_text = _llm_text(llm)
         usage = llm.get("usage", {}) if isinstance(llm, dict) else {}

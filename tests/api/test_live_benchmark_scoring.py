@@ -24,6 +24,15 @@ def test_missing_evidence_cannot_score_as_success():
     assert scored["status_match"] is False
 
 
+def test_content_match_distinguishes_duplicate_runbook_from_fresh_upload():
+    case = {"id": "gc-01", "expected_status": "ok", "docs": [{"content": "OOMKilled: check memory limit."}]}
+    body = {"status": "ok", "citations": [{"document_id": "older-copy"}],
+            "evidence": [{"document_id": "older-copy", "quote": "OOMKilled: check memory limit."}]}
+    scored = score_case(case, body, {"fresh-upload"}, 100)
+    assert scored["retrieval_recall_at_5"] == 0.0
+    assert scored["content_recall_at_5"] == 1.0
+
+
 def test_summary_reports_insufficient_evidence_separately():
     sufficient = score_case(
         {"id": "gc-01", "expected_status": "ok", "expected_hypothesis_contains": "memory limit"},
@@ -39,6 +48,20 @@ def test_summary_reports_insufficient_evidence_separately():
     assert result["abstention_rate"] == 1.0
     assert result["hypothesis_substring_match"] == 1.0
     assert result["p95_latency_ms"] == 200
+
+
+def test_summary_separates_http_availability_from_quality():
+    case = {"id": "ok", "expected_status": "ok", "docs": [{"content": "OOMKilled runbook"}]}
+    success = score_case(case, {"status": "ok", "citations": [{"document_id": "doc"}],
+                                "evidence": [{"document_id": "doc", "quote": "OOMKilled runbook"}]},
+                         {"doc"}, 100)
+    unavailable = score_case({**case, "id": "error"}, {"status": "http_error"}, {"doc2"}, 200,
+                             http_status=429)
+    summary = summarize([success, unavailable])
+    assert summary["http_error_rate"] == 0.5
+    assert summary["retrieval_recall_at_5"] == 0.5
+    assert summary["available_sufficient_cases"] == 1
+    assert summary["available_retrieval_recall_at_5"] == 1.0
 
 
 def test_live_runner_uploads_waits_and_scores_actual_citation(monkeypatch, tmp_path):
@@ -127,3 +150,40 @@ def test_live_runner_records_case_http_errors_and_continues(monkeypatch, tmp_pat
     assert len(report["results"]) == 2
     assert report["summary"]["http_error_rate"] == 0.5
     assert report["errors"] and "HTTP 503" in report["errors"][0]
+
+
+def test_live_runner_continues_after_incident_creation_failure(monkeypatch, tmp_path):
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([
+        {"id": "one", "incident": {"title": "one"}, "docs": [], "expected_status": "insufficient_evidence"},
+        {"id": "two", "incident": {"title": "two"}, "docs": [], "expected_status": "insufficient_evidence"},
+    ]), encoding="utf-8")
+
+    class Response:
+        def __init__(self, status, payload=None):
+            self.status_code, self.payload = status, payload or {}
+            self.text = "temporary failure" if status == 503 else ""
+
+        def json(self):
+            return self.payload
+
+    class Session:
+        def __init__(self):
+            self.headers = {}
+            self.creates = 0
+
+        def post(self, url, **_kwargs):
+            if url.endswith("/incidents"):
+                self.creates += 1
+                return Response(503) if self.creates == 1 else Response(201, {"incident_id": "second"})
+            if url.endswith("/triage"):
+                return Response(200, {"status": "insufficient_evidence", "citations": []})
+            raise AssertionError(url)
+
+    monkeypatch.setattr("eval.run_live_benchmark.requests.Session", Session)
+    report = run("https://incidentiq-preview.example.workers.dev", dataset, tmp_path / "report.json",
+                 "test-key", inter_case_delay=0)
+    assert report["complete"] is True
+    assert len(report["results"]) == 2
+    assert report["summary"]["http_error_rate"] == 0.5
+    assert report["errors"] and "create incident one" in report["errors"][0]

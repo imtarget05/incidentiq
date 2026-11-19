@@ -37,6 +37,17 @@ def score_case(case: dict[str, Any], body: dict[str, Any], expected_doc_ids: set
     observed = [str(c.get("document_id")) for c in citations[:5] if isinstance(c, dict)]
     matched = expected_doc_ids.intersection(observed)
     rank = next((i for i, doc_id in enumerate(observed, 1) if doc_id in expected_doc_ids), None)
+    evidence = body.get("evidence") or []
+    observed_content = {
+        " ".join(str(item.get("quote", "")).split())
+        for item in evidence if isinstance(item, dict) and str(item.get("document_id")) in observed
+    }
+    expected_content = {
+        " ".join(str(doc.get("content", "")).split())
+        for doc in case.get("docs", []) if isinstance(doc, dict)
+    }
+    content_matches = sum(any(content == quote or content.startswith(quote) and len(quote) >= 40
+                              for quote in observed_content) for content in expected_content)
     hypothesis_text = " ".join(str(h.get("text", "")) for h in body.get("hypotheses", []) if isinstance(h, dict))
     expected_text = case.get("expected_hypothesis_contains")
     return {
@@ -48,6 +59,7 @@ def score_case(case: dict[str, Any], body: dict[str, Any], expected_doc_ids: set
         "expected_document_count": len(expected_doc_ids),
         "citation_count": len(citations),
         "retrieval_recall_at_5": len(matched) / len(expected_doc_ids) if expected_doc_ids else 0.0,
+        "content_recall_at_5": content_matches / len(expected_content) if expected_content else 0.0,
         "reciprocal_rank_at_5": 1.0 / rank if rank else 0.0,
         "hypothesis_substring_match": (expected_text.lower() in hypothesis_text.lower()) if expected_text else None,
         "hypothesis_excerpt": hypothesis_text[:160],
@@ -59,17 +71,27 @@ def score_case(case: dict[str, Any], body: dict[str, Any], expected_doc_ids: set
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     sufficient = [r for r in results if r["expected_status"] == "ok"]
     insufficient = [r for r in results if r["expected_status"] == "insufficient_evidence"]
+    available_sufficient = [r for r in sufficient if r.get("http_status") == 200]
+    available_insufficient = [r for r in insufficient if r.get("http_status") == 200]
     latencies = sorted(r["latency_ms"] for r in results)
-    rate = lambda xs, field: sum(float(r[field]) for r in xs) / len(xs) if xs else None
+    def rate(xs: list[dict[str, Any]], field: str) -> float | None:
+        values = [float(r[field]) for r in xs if r.get(field) is not None]
+        return sum(values) / len(values) if values else None
     return {
         "completed_cases": len(results),
         "http_error_rate": sum(r.get("http_status") != 200 for r in results) / len(results) if results else None,
         "sufficient_cases": len(sufficient),
         "insufficient_cases": len(insufficient),
+        "available_sufficient_cases": len(available_sufficient),
+        "available_insufficient_cases": len(available_insufficient),
         "retrieval_recall_at_5": rate(sufficient, "retrieval_recall_at_5"),
+        "content_recall_at_5": rate(sufficient, "content_recall_at_5"),
+        "available_retrieval_recall_at_5": rate(available_sufficient, "retrieval_recall_at_5"),
+        "available_content_recall_at_5": rate(available_sufficient, "content_recall_at_5"),
         "citation_mrr_at_5": rate(sufficient, "reciprocal_rank_at_5"),
         "hypothesis_substring_match": rate(sufficient, "hypothesis_substring_match"),
         "abstention_rate": sum(r["actual_status"] == "insufficient_evidence" for r in insufficient) / len(insufficient) if insufficient else None,
+        "available_abstention_rate": sum(r["actual_status"] == "insufficient_evidence" for r in available_insufficient) / len(available_insufficient) if available_insufficient else None,
         "status_accuracy": sum(r["status_match"] for r in results) / len(results) if results else None,
         "mean_latency_ms": sum(latencies) / len(latencies) if latencies else None,
         "p95_latency_ms": latencies[math.ceil(0.95 * len(latencies)) - 1] if latencies else None,
@@ -150,17 +172,17 @@ def run(base_url: str, dataset_path: Path, output: Path, api_key: str, wait_seco
 
         for case_index, case in enumerate(cases):
             incident = dict(case["incident"])
-            response = session.post(
-                f"{base_url}/api/v1/incidents", json=incident,
-                headers={"Idempotency-Key": f"{run_id}-incident-{case['id']}"}, timeout=30,
-            )
-            payload = require_response(response, 201, f"create incident {case['id']}")
-            incident_id = payload.get("incident_id")
-            if not incident_id:
-                raise RuntimeError(f"create incident {case['id']}: missing incident_id")
             start = time.monotonic()
             response = None
             try:
+                response = session.post(
+                    f"{base_url}/api/v1/incidents", json=incident,
+                    headers={"Idempotency-Key": f"{run_id}-incident-{case['id']}"}, timeout=30,
+                )
+                payload = require_response(response, 201, f"create incident {case['id']}")
+                incident_id = payload.get("incident_id")
+                if not incident_id:
+                    raise RuntimeError(f"create incident {case['id']}: missing incident_id")
                 response = session.post(f"{base_url}/api/v1/incidents/{incident_id}/triage", json={}, timeout=90)
                 latency_ms = round((time.monotonic() - start) * 1000)
                 body = require_response(response, 200, f"triage {case['id']}")

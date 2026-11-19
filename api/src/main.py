@@ -1150,91 +1150,93 @@ async def _store_triage_report(env: Any, incident_id: str, tenant_id: str, statu
            json.dumps(read_only_checks), json.dumps(citations), _now_ms()).run()
 
 
-async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5,
-                         keyword_query: str | None = None) -> list[dict[str, Any]]:
-    """Hybrid retrieval: Vectorize semantic + D1 FTS5 keyword, merged and re-ranked.
-    Both paths are tenant-isolated. Failures in one path do not fail the other.
-    """
-    results: list[dict[str, Any]] = []
-    seen: set = set()
-    title_tokens = {token.lower() for token in re.findall(r"[A-Za-z0-9]+", keyword_query or "")}
+def _retrieval_relevant(content: str, title_tokens: set[str]) -> bool:
+    if not title_tokens:
+        return True
+    content_tokens = {token.lower() for token in re.findall(r"[A-Za-z0-9]+", content)}
+    overlap = title_tokens & content_tokens
+    return len(overlap) >= 2 or any(len(token) >= 8 for token in overlap)
 
-    def relevant(content: str) -> bool:
-        if not title_tokens:
-            return True
-        content_tokens = {token.lower() for token in re.findall(r"[A-Za-z0-9]+", content)}
-        overlap = title_tokens & content_tokens
-        return len(overlap) >= 2 or any(len(token) >= 8 for token in overlap)
 
-    # 1. Vectorize semantic search (tenant-isolated via metadata filter).
-    question_vector: list[float] | None = None
+async def _vector_candidates(env: Any, tenant_id: str, query: str, top_k: int,
+                             title_tokens: set[str]) -> list[dict[str, Any]]:
+    """Fetch tenant-scoped semantic candidates; leave keyword search available on failure."""
     try:
         embed = await env.ai.run("@cf/qwen/qwen3-embedding-0.6b", {"text": [query]})
         vectors = embed.get("vectors") or embed.get("data") or []
-        question_vector = vectors[0] if vectors else None
+        if not vectors:
+            return []
+        raw = await env.VECTORIZE_INDEX.query(vectors[0], {
+            "topK": top_k, "returnMetadata": "all", "namespace": tenant_id,
+            "filter": {"tenant_id": tenant_id},
+        })
     except Exception:
-        question_vector = None
-    if question_vector:
-        try:
-            raw = await env.VECTORIZE_INDEX.query(question_vector, {
-                "topK": top_k, "returnMetadata": "all",
-                "namespace": tenant_id,
-                "filter": {"tenant_id": tenant_id},
-            })
-            matches = raw.get("matches", []) if isinstance(raw, dict) else []
-            for m in matches:
-                meta = m.get("metadata", {}) or {}
-                doc_id = meta.get("document_id")
-                if not doc_id or not relevant(meta.get("content", "")):
-                    continue
-                key = f"vec:{doc_id}:{meta.get('chunk_id')}"
-                if key in seen:
-                    continue
-                seen.add(key)
-                results.append({
-                    "document_id": doc_id,
-                    "chunk_id": meta.get("chunk_id"),
-                    "content": meta.get("content", ""),
-                    "score": float(m.get("score", 0) or 0),
-                    "version": meta.get("version", 1),
-                    "source": "vector",
-                })
-        except Exception:
-            pass
+        return []
 
-    # 2. D1 FTS5 keyword search (tenant-isolated via join to documents).
+    matches = raw.get("matches", []) if isinstance(raw, dict) else []
+    candidates: list[dict[str, Any]] = []
+    seen_chunks: set[str] = set()
+    try:
+        for match in matches:
+            meta = match.get("metadata", {}) or {}
+            doc_id = meta.get("document_id")
+            content = meta.get("content", "")
+            if not doc_id or not _retrieval_relevant(content, title_tokens):
+                continue
+            key = f"{doc_id}:{meta.get('chunk_id')}"
+            if key in seen_chunks:
+                continue
+            seen_chunks.add(key)
+            candidates.append({
+                "document_id": doc_id, "chunk_id": meta.get("chunk_id"),
+                "content": content, "score": float(match.get("score", 0) or 0),
+                "version": meta.get("version", 1), "source": "vector",
+            })
+    except Exception:
+        pass
+    return candidates
+
+
+async def _keyword_candidates(env: Any, tenant_id: str, query: str, top_k: int,
+                              title_tokens: set[str]) -> list[dict[str, Any]]:
+    """Fetch tenant-scoped FTS5 candidates, preferring recent equal-ranked copies."""
     try:
         fts_query = " OR ".join(f'"{token}"' for token in sorted(title_tokens)) if title_tokens else query
-        fts_rows = await _db_all(env.DB.prepare(
+        rows = await _db_all(env.DB.prepare(
             "SELECT d.id, d.filename, d.content, bm25(documents_fts) AS rank "
             "FROM documents_fts JOIN documents d ON d.rowid = documents_fts.rowid "
             "WHERE documents_fts MATCH ? AND d.tenant_id = ? "
             "ORDER BY rank ASC, d.uploaded_at DESC LIMIT ?"
         ).bind(fts_query, tenant_id, top_k))
-        for r in fts_rows or []:
-            doc_id = r[0] if not isinstance(r, dict) else r.get("id")
-            content = r[2] if not isinstance(r, dict) else r.get("content")
-            if not doc_id or not relevant(content or ""):
+    except Exception:
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    seen_docs: set[str] = set()
+    try:
+        for row in rows or []:
+            doc_id = row.get("id") if isinstance(row, dict) else row[0]
+            content = row.get("content") if isinstance(row, dict) else row[2]
+            if not doc_id or doc_id in seen_docs or not _retrieval_relevant(content or "", title_tokens):
                 continue
-            key = f"fts:{doc_id}"
-            if key in seen:
-                continue
-            seen.add(key)
-            rank = r[3] if not isinstance(r, dict) else r.get("rank", 0)
-            results.append({
-                "document_id": doc_id,
-                "chunk_id": None,
-                "content": content,
-                # FTS5 bm25() returns lower (usually negative) scores for
-                # stronger matches. Negating keeps the API score monotonic.
-                "score": -float(rank or 0),
-                "version": 1,
-                "source": "keyword",
+            seen_docs.add(doc_id)
+            rank = row.get("rank", 0) if isinstance(row, dict) else row[3]
+            candidates.append({
+                "document_id": doc_id, "chunk_id": None, "content": content,
+                "score": -float(rank or 0), "version": 1, "source": "keyword",
             })
     except Exception:
         pass
+    return candidates
 
-    results.sort(key=lambda x: (0 if x["source"] == "keyword" else 1, -x["score"]))
+
+async def _hybrid_search(env: Any, tenant_id: str, query: str, top_k: int = 5,
+                         keyword_query: str | None = None) -> list[dict[str, Any]]:
+    """Merge tenant-scoped Vectorize and FTS5 candidates, surviving either path failing."""
+    title_tokens = {token.lower() for token in re.findall(r"[A-Za-z0-9]+", keyword_query or "")}
+    results = await _vector_candidates(env, tenant_id, query, top_k, title_tokens)
+    results += await _keyword_candidates(env, tenant_id, query, top_k, title_tokens)
+    results.sort(key=lambda item: (0 if item["source"] == "keyword" else 1, -item["score"]))
     unique: list[dict[str, Any]] = []
     seen_docs: set[str] = set()
     for result in results:

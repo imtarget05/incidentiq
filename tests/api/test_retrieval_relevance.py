@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from types import SimpleNamespace
 
 import main
@@ -53,3 +54,37 @@ def test_keyword_result_is_not_discarded_after_five_vector_neighbors():
     results = search("OOMKilled payment-api", vectors, [exact])
     assert results[0]["document_id"] == "expected"
     assert len(results) == 5
+
+
+def test_newest_identical_runbook_is_kept_when_fts_limit_is_five():
+    conn = sqlite3.connect(":memory:")
+    conn.executescript("""
+        CREATE TABLE documents(id TEXT, tenant_id TEXT, filename TEXT, content TEXT, uploaded_at INTEGER);
+        CREATE VIRTUAL TABLE documents_fts USING fts5(content, content=documents, content_rowid=rowid);
+        CREATE TRIGGER documents_fts_ai AFTER INSERT ON documents BEGIN
+            INSERT INTO documents_fts(rowid, content) VALUES (new.rowid, new.content);
+        END;
+    """)
+    for i in range(6):
+        conn.execute("INSERT INTO documents VALUES (?, 't1', 'runbook.txt', ?, ?)",
+                     (f"old-{i}", "OOMKilled payment-api: check memory limit.", i))
+    conn.execute("INSERT INTO documents VALUES ('fresh', 't1', 'runbook.txt', ?, 100)",
+                 ("OOMKilled payment-api: check memory limit.",))
+
+    class SqliteDB:
+        def prepare(self, sql):
+            self.sql = sql
+            return self
+
+        def bind(self, *params):
+            self.params = params
+            return self
+
+        def all(self):
+            return conn.execute(self.sql, self.params).fetchall()
+
+    env = SimpleNamespace(ai=AI(), VECTORIZE_INDEX=Vectorize([]), DB=SqliteDB())
+    results = asyncio.run(main._hybrid_search(env, "t1", "OOMKilled payment-api",
+                                              keyword_query="OOMKilled payment-api"))
+    assert len(results) == 5
+    assert results[0]["document_id"] == "fresh"

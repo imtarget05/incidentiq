@@ -41,7 +41,7 @@ class FakeVectorize:
 class FakeAI:
     def __init__(self, embed_vector=None, llm_response=None):
         self.embed_vector = embed_vector or [0.1] * 1024
-        self.llm_response = llm_response or "answer"
+        self.llm_response = "answer" if llm_response is None else llm_response
         self.calls = []
 
     async def run(self, model, inputs):
@@ -294,9 +294,44 @@ def test_triage_grounded_with_citations(monkeypatch):
     assert len(body["read_only_checks"]) >= 1
     # similar incidents: none for t1 payment-api (only one incident)
     assert body["similar_incidents"] == []
+    generation_calls = [inputs for model, inputs in env.ai.calls if model == "@cf/openai/gpt-oss-20b"]
+    assert generation_calls[0]["max_tokens"] == 1024
     saved = client.get(f"/api/v1/incidents/{inc_id}/report", headers=h)
     assert saved.status_code == 200
     assert saved.json()["summary"] == body["summary"]
+
+
+def test_triage_empty_model_output_is_reported_as_unavailable(monkeypatch):
+    key_hash = main._sha256_hex("sk-test12345678")
+    env = make_env(key_hash, "t1")
+    _setup_db(env, llm_response="")
+    _set_env(monkeypatch, env)
+    client = TestClient(main.app)
+    headers = _headers(env, idem="empty-model")
+    created = client.post("/api/v1/incidents", json={
+        "title": "OOMKilled payment-api", "severity": "CRITICAL",
+        "service": "payment-api", "environment": "prod",
+    }, headers=headers)
+    incident_id = created.json()["incident_id"]
+    env.DB.documents["doc-1"] = {
+        "id": "doc-1", "tenant_id": "t1", "filename": "oom-runbook.md",
+        "content": "OOMKilled exit code 137: inspect memory usage.",
+        "status": "processed", "idempotency_key": "dk-1", "uploaded_at": 1, "version": 1,
+    }
+    env.VECTORIZE_INDEX.matches = [{
+        "id": "vec-1", "score": 0.9,
+        "metadata": {"document_id": "doc-1", "tenant_id": "t1", "chunk_id": "doc-1-v1-0",
+                     "content": "OOMKilled exit code 137: inspect memory usage.", "version": 1},
+    }]
+    response = client.post(f"/api/v1/incidents/{incident_id}/triage",
+                           headers={**headers, "Idempotency-Key": "empty-model-2"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ai_unavailable"
+    assert body["hypotheses"][0]["confirmed"] is False
+    assert body["citations"]
+    saved = client.get(f"/api/v1/incidents/{incident_id}/report", headers=headers)
+    assert saved.json()["status"] == "ai_unavailable"
 
 
 def test_triage_insufficient_evidence(monkeypatch):

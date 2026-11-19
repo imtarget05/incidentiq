@@ -1359,11 +1359,15 @@ async def triage_incident(incident_id: str, request: Request,
                 {"role": "system", "content": TRIAGE_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
-            "max_tokens": 512,
+            "max_tokens": 1024,
         })
         answer_text = _llm_text(llm)
         usage = llm.get("usage", {}) if isinstance(llm, dict) else {}
         tokens_used = usage.get("total_tokens", 0)
+        if not answer_text.strip():
+            ai_available = False
+            _log_event("triage.empty_model_output", request_id=getattr(request.state, "request_id", None),
+                       incident_id=incident_id, tokens_used=tokens_used)
     except Exception:
         answer_text = ""
         ai_available = False
@@ -1398,25 +1402,26 @@ async def triage_incident(incident_id: str, request: Request,
         hypotheses = [{"text": summary, "confirmed": False}]
     if not ai_available:
         summary = (
-            f"Workers AI is currently unavailable. {len(context_chunks)} evidence item(s) were "
+            f"AI inference did not return an answer. {len(context_chunks)} evidence item(s) were "
             f"retrieved from the knowledge base. Manual review recommended."
         )
         hypotheses = [{"text": "AI inference unavailable — review evidence items manually.", "confirmed": False}]
     similar = await _similar_incidents(env, tenant_id, incident_id, service)
     try:
-        await _store_triage_report(env, incident_id, tenant_id, "ok", summary, hypotheses,
+        await _store_triage_report(env, incident_id, tenant_id, "ok" if ai_available else "ai_unavailable", summary, hypotheses,
                                    evidence, similar, read_only_checks, citations)
     except Exception as exc:
         _log_event("triage.report_persist_failed", request_id=getattr(request.state, "request_id", None),
                    incident_id=incident_id, error=type(exc).__name__)
         return _json_error(503, "report_persist_failed", "Triage report could not be persisted")
-    await _record_triage_metric(env, tenant_id, incident_id, "ok", len(citations), tokens_used, 0)
+    await _record_triage_metric(env, tenant_id, incident_id, "ok" if ai_available else "ai_unavailable", len(citations), tokens_used, 0)
     await _record_token_usage(env, tenant_id, "triage", "@cf/openai/gpt-oss-20b", 0, 0, tokens_used)
     await _audit(env, tenant_id, tenant_id, "incident.triage", incident_id,
-                 {"status": "ok", "tokens": tokens_used, "citations": [c["id"] for c in citations]})
+                 {"status": "ok" if ai_available else "ai_unavailable", "tokens": tokens_used,
+                  "citations": [c["id"] for c in citations]})
 
     return JSONResponse({
-        "status": "ok",
+        "status": "ok" if ai_available else "ai_unavailable",
         "incident_id": incident_id,
         "summary": summary,
         "hypotheses": hypotheses,

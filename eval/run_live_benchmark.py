@@ -193,9 +193,12 @@ def run(base_url: str, dataset_path: Path, output: Path, api_key: str, wait_seco
                 result["errors"].append(str(exc))
                 result["results"].append(score_case(case, {"status": "http_error"}, uploaded[case["id"]],
                                                     latency_ms, http_status=status_code))
+                if status_code == 429 and response is not None and "ai_quota_exceeded" in response.text:
+                    # Stop when the daily model quota is exhausted.
+                    break
             if case_index + 1 < len(cases) and inter_case_delay > 0:
                 time.sleep(inter_case_delay)
-        result["complete"] = True
+        result["complete"] = len(result["results"]) == len(cases)
     except (requests.RequestException, RuntimeError, TimeoutError, ValueError) as exc:
         result["errors"].append(str(exc))
     finally:

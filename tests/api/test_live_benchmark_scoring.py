@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from eval.run_live_benchmark import run, score_case, summarize
 
 
@@ -187,3 +189,46 @@ def test_live_runner_continues_after_incident_creation_failure(monkeypatch, tmp_
     assert len(report["results"]) == 2
     assert report["summary"]["http_error_rate"] == 0.5
     assert report["errors"] and "create incident one" in report["errors"][0]
+
+
+def test_live_runner_stops_after_quota_429(monkeypatch, tmp_path):
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([
+        {"id": "gc-01", "incident": {"title": "one"}, "docs": [],
+         "expected_status": "ok", "expected_hypothesis_contains": None},
+        {"id": "gc-02", "incident": {"title": "two"}, "docs": [],
+         "expected_status": "ok", "expected_hypothesis_contains": None},
+    ]), encoding="utf-8")
+
+    class Response:
+        def __init__(self, status, payload=None):
+            self.status_code = status
+            self.payload = payload or {}
+            self.text = '{"error":{"code":"ai_quota_exceeded"}}' if status == 429 else ""
+
+        def json(self):
+            return self.payload
+
+    class Session:
+        def __init__(self):
+            self.headers = {}
+            self.triage_calls = 0
+
+        def post(self, url, **kwargs):
+            if url.endswith("/incidents"):
+                return Response(201, {"incident_id": "id"})
+            if url.endswith("/triage"):
+                self.triage_calls += 1
+                return Response(429)
+            raise AssertionError(url)
+
+    session = Session()
+    monkeypatch.setattr("eval.run_live_benchmark.requests.Session", lambda: session)
+    output = tmp_path / "result.json"
+    with pytest.raises(RuntimeError, match="incomplete"):
+        run("https://incidentiq-preview.example.workers.dev", dataset, output, "test-key", inter_case_delay=0)
+    report = json.loads(output.read_text())
+    assert session.triage_calls == 1
+    assert report["complete"] is False
+    assert report["summary"]["http_error_rate"] == 1.0
+    assert report["summary"]["available_retrieval_recall_at_5"] is None

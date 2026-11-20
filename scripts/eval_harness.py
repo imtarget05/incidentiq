@@ -24,15 +24,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api", "src"))
 
 import main  # noqa: E402
 
+ALLOWED_LIVE_HOSTS = {
+    "incidentiq-preview.tanmainguyenbinh.workers.dev",
+    "ai-knowledge-platform.tanmainguyenbinh.workers.dev",
+}
+
 
 def validate_live_url(value: str) -> str:
-    """Allow only explicit HTTPS Cloudflare Worker hosts for live smoke runs."""
+    """Send the evaluation key only to IncidentIQ-owned Worker hosts."""
     parsed = urlsplit(value)
     host = (parsed.hostname or "").lower()
     if (parsed.scheme != "https" or parsed.username or parsed.password or parsed.port
             or parsed.path not in ("", "/") or parsed.query or parsed.fragment
-            or not host.endswith(".workers.dev") or host.count(".") < 3):
-        raise ValueError("--live must be a bare HTTPS *.workers.dev URL")
+            or host not in ALLOWED_LIVE_HOSTS):
+        raise ValueError("--live must be a bare HTTPS IncidentIQ Worker URL")
     return f"https://{host}"
 
 

@@ -12,14 +12,17 @@ SPEC.loader.exec_module(MODULE)
 
 
 def test_live_url_accepts_bare_cloudflare_preview():
-    assert MODULE.validate_live_url("https://incidentiq-preview.example.workers.dev/") == (
-        "https://incidentiq-preview.example.workers.dev")
+    assert MODULE.validate_live_url("https://incidentiq-preview.tanmainguyenbinh.workers.dev/") == (
+        "https://incidentiq-preview.tanmainguyenbinh.workers.dev")
+    assert MODULE.validate_live_url("https://ai-knowledge-platform.tanmainguyenbinh.workers.dev") == (
+        "https://ai-knowledge-platform.tanmainguyenbinh.workers.dev")
 
 
 @pytest.mark.parametrize("url", [
     "http://incidentiq-preview.example.workers.dev",
     "https://127.0.0.1",
     "https://incidentiq-preview.example.workers.dev.evil.test",
+    "https://attacker.account.workers.dev",
     "https://user@incidentiq-preview.example.workers.dev",
     "https://incidentiq-preview.example.workers.dev:8443",
     "https://incidentiq-preview.example.workers.dev/path",

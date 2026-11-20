@@ -57,12 +57,14 @@ def score_case(case: dict[str, Any], body: dict[str, Any], expected_doc_ids: set
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
-    sufficient = [r for r in results if r["expected_status"] == "ok"]
-    insufficient = [r for r in results if r["expected_status"] == "insufficient_evidence"]
+    successful = [r for r in results if r.get("http_status") == 200]
+    sufficient = [r for r in successful if r["expected_status"] == "ok"]
+    insufficient = [r for r in successful if r["expected_status"] == "insufficient_evidence"]
     latencies = sorted(r["latency_ms"] for r in results)
     rate = lambda xs, field: sum(float(r[field]) for r in xs) / len(xs) if xs else None
     return {
         "completed_cases": len(results),
+        "successful_http_cases": len(successful),
         "http_error_rate": sum(r.get("http_status") != 200 for r in results) / len(results) if results else None,
         "sufficient_cases": len(sufficient),
         "insufficient_cases": len(insufficient),
@@ -70,7 +72,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "citation_mrr_at_5": rate(sufficient, "reciprocal_rank_at_5"),
         "hypothesis_substring_match": rate(sufficient, "hypothesis_substring_match"),
         "abstention_rate": sum(r["actual_status"] == "insufficient_evidence" for r in insufficient) / len(insufficient) if insufficient else None,
-        "status_accuracy": sum(r["status_match"] for r in results) / len(results) if results else None,
+        "status_accuracy": sum(r["status_match"] for r in successful) / len(successful) if successful else None,
         "mean_latency_ms": sum(latencies) / len(latencies) if latencies else None,
         "p95_latency_ms": latencies[math.ceil(0.95 * len(latencies)) - 1] if latencies else None,
     }
@@ -171,9 +173,13 @@ def run(base_url: str, dataset_path: Path, output: Path, api_key: str, wait_seco
                 result["errors"].append(str(exc))
                 result["results"].append(score_case(case, {"status": "http_error"}, uploaded[case["id"]],
                                                     latency_ms, http_status=status_code))
+                if status_code == 429:
+                    # A daily model quota will not recover during this run.
+                    # Stop rather than spending requests on every remaining case.
+                    break
             if case_index + 1 < len(cases) and inter_case_delay > 0:
                 time.sleep(inter_case_delay)
-        result["complete"] = True
+        result["complete"] = len(result["results"]) == len(cases)
     except (requests.RequestException, RuntimeError, TimeoutError, ValueError) as exc:
         result["errors"].append(str(exc))
     finally:

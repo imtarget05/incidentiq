@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from eval.run_live_benchmark import run, score_case, summarize
 
 
@@ -39,6 +41,19 @@ def test_summary_reports_insufficient_evidence_separately():
     assert result["abstention_rate"] == 1.0
     assert result["hypothesis_substring_match"] == 1.0
     assert result["p95_latency_ms"] == 200
+
+
+def test_summary_excludes_http_failures_from_quality_denominators():
+    failed = score_case(
+        {"id": "gc-02", "expected_status": "ok", "expected_hypothesis_contains": "memory limit"},
+        {"status": "http_error"}, {"uploaded-2"}, 20, http_status=429,
+    )
+    result = summarize([failed])
+    assert result["http_error_rate"] == 1.0
+    assert result["retrieval_recall_at_5"] is None
+    assert result["citation_mrr_at_5"] is None
+    assert result["hypothesis_substring_match"] is None
+    assert result["status_accuracy"] is None
 
 
 def test_live_runner_uploads_waits_and_scores_actual_citation(monkeypatch, tmp_path):
@@ -127,3 +142,46 @@ def test_live_runner_records_case_http_errors_and_continues(monkeypatch, tmp_pat
     assert len(report["results"]) == 2
     assert report["summary"]["http_error_rate"] == 0.5
     assert report["errors"] and "HTTP 503" in report["errors"][0]
+
+
+def test_live_runner_stops_after_daily_quota_429(monkeypatch, tmp_path):
+    dataset = tmp_path / "dataset.json"
+    dataset.write_text(json.dumps([
+        {"id": "gc-01", "incident": {"title": "one"}, "docs": [],
+         "expected_status": "ok", "expected_hypothesis_contains": None},
+        {"id": "gc-02", "incident": {"title": "two"}, "docs": [],
+         "expected_status": "ok", "expected_hypothesis_contains": None},
+    ]), encoding="utf-8")
+
+    class Response:
+        def __init__(self, status, payload=None):
+            self.status_code = status
+            self.payload = payload or {}
+            self.text = '{"error":{"code":"ai_quota_exceeded"}}' if status == 429 else ""
+
+        def json(self):
+            return self.payload
+
+    class Session:
+        def __init__(self):
+            self.headers = {}
+            self.triage_calls = 0
+
+        def post(self, url, **kwargs):
+            if url.endswith("/incidents"):
+                return Response(201, {"incident_id": "id"})
+            if url.endswith("/triage"):
+                self.triage_calls += 1
+                return Response(429)
+            raise AssertionError(url)
+
+    session = Session()
+    monkeypatch.setattr("eval.run_live_benchmark.requests.Session", lambda: session)
+    output = tmp_path / "result.json"
+    with pytest.raises(RuntimeError, match="incomplete"):
+        run("https://incidentiq-preview.example.workers.dev", dataset, output, "test-key", inter_case_delay=0)
+    report = json.loads(output.read_text())
+    assert session.triage_calls == 1
+    assert report["complete"] is False
+    assert report["summary"]["http_error_rate"] == 1.0
+    assert report["summary"]["retrieval_recall_at_5"] is None

@@ -18,10 +18,27 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api", "src"))
 
 import main  # noqa: E402
+
+ALLOWED_LIVE_HOSTS = {
+    "incidentiq-preview.tanmainguyenbinh.workers.dev",
+    "ai-knowledge-platform.tanmainguyenbinh.workers.dev",
+}
+
+
+def validate_live_url(value: str) -> str:
+    """Send the evaluation key only to IncidentIQ-owned Worker hosts."""
+    parsed = urlsplit(value)
+    host = (parsed.hostname or "").lower()
+    if (parsed.scheme != "https" or parsed.username or parsed.password or parsed.port
+            or parsed.path not in ("", "/") or parsed.query or parsed.fragment
+            or host not in ALLOWED_LIVE_HOSTS):
+        raise ValueError("--live must be a bare HTTPS IncidentIQ Worker URL")
+    return f"https://{host}"
 
 
 # --------------------------------------------------------------------------- fakes
@@ -467,6 +484,13 @@ def main_eval(live_url: str | None, dataset_path: str | None = None) -> None:
     if live_url:
         # Live mode: hit a deployed worker (requires Cloudflare creds).
         import urllib.request
+        live_url = validate_live_url(live_url)
+
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, request, fp, code, msg, headers, newurl):
+                raise ValueError("live worker redirect blocked")
+
+        opener = urllib.request.build_opener(NoRedirect)
         results = []
         for case in cases:
             inc = case["incident"]
@@ -476,7 +500,7 @@ def main_eval(live_url: str | None, dataset_path: str | None = None) -> None:
                                                    "Idempotency-Key": f"eval-live-{case['id']}"},
                                           method="POST")
             try:
-                with urllib.request.urlopen(resp) as f:
+                with opener.open(resp, timeout=20) as f:
                     inc_id = _json.loads(f.read())["incident_id"]
             except Exception as e:
                 results.append({"id": case["id"], "error": str(e), "actual_status": "error"})

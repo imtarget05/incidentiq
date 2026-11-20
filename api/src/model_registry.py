@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,9 +34,14 @@ class ModelVersion:
 
 
 class ModelRegistry:
-    def __init__(self, registry_path: str = "/opt/incidentiq/finetune/registry.json"):
-        self.path = Path(registry_path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, registry_path: str = "/opt/incidentiq/finetune/registry.json",
+                 registry_root: str = "/opt/incidentiq/finetune"):
+        root = Path(registry_root).resolve()
+        path = Path(registry_path).resolve()
+        if not path.is_relative_to(root) or path.suffix != ".json":
+            raise ValueError("registry path must be a JSON file inside the registry root")
+        self.path = path
+        root.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
             self.path.write_text("{}", encoding="utf-8")
 
@@ -42,7 +49,19 @@ class ModelRegistry:
         return json.loads(self.path.read_text(encoding="utf-8"))
 
     def _save(self, data: dict[str, Any]) -> None:
-        self.path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        # Replace the directory entry atomically, so a symlink planted at the
+        # target cannot redirect the write outside the checked registry root.
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
+                                             prefix=".registry-", suffix=".tmp", delete=False) as stream:
+                temp_path = Path(stream.name)
+                os.chmod(temp_path, 0o600)
+                json.dump(data, stream, indent=2, ensure_ascii=False)
+            os.replace(temp_path, self.path)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
 
     def register(
         self,

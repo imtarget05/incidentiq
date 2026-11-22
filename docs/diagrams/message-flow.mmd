@@ -1,0 +1,30 @@
+%%{init: {'theme': 'base'}}%%
+sequenceDiagram
+    participant C as Client
+    participant W as Cloudflare Worker
+    participant D1 as D1 Database
+    participant VEC as Vectorize
+    participant QUE as Cloudflare Queues
+    participant AI as Workers AI (Embedding)
+
+    C->>W: POST /api/ingest {url, mode}
+    W->>D1: INSERT document (status='processing')
+    W->>QUE: enqueue etl-queue {doc_id, url}
+    W-->>C: 202 Accepted
+
+    loop Consumer loop
+        QUE->>QUE: consume etl-queue
+        QUE->>W: deliver message
+        W->>AI: embed(text)
+        AI-->>W: vector
+        W->>VEC: upsert vector {doc_id, vector}
+        W->>D1: UPDATE document (status='indexed')
+        W->>QUE: ack message
+    end
+
+    C->>W: GET /api/search?query=...
+    W->>VEC: query vectors (top-K)
+    VEC-->>W: relevant docs
+    W->>D1: SELECT metadata
+    D1-->>W: metadata
+    W-->>C: Answer + citations

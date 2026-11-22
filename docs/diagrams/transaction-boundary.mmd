@@ -1,0 +1,36 @@
+%%{init: {'theme': 'base'}}%%
+flowchart TB
+    subgraph Client ["Client"]
+        U[Người dùng upload tài liệu / submit text]
+    end
+
+    subgraph Worker ["Cloudflare Worker (transactional boundary)"]
+        BEGIN[BEGIN request]
+        VALIDATE[Validate input + auth]
+        INGEST[Enqueue to etl-queue OR inline process]
+        STORE_D1[Write metadata to D1]
+        INDEX_VEC[Upsert vector to Vectorize]
+        COMMIT[Return 200/202 to client]
+        ROLLBACK[Return error on failure]
+    end
+
+    subgraph ETL ["ETL Consumer (async)"]
+        CONSUME[Consume from etl-queue]
+        EMBED[Embed text via Workers AI]
+        UPSERT[Upsert to Vectorize]
+        MARK[Mark as processed]
+        DLQ[Move to etl-dlq on repeated failure]
+    end
+
+    U --> BEGIN --> VALIDATE --> INGEST --> STORE_D1 --> INDEX_VEC --> COMMIT
+    INGEST -.->|queue mode| CONSUME --> EMBED --> UPSERT --> MARK
+    VALIDATE -.->|Invalid| ROLLBACK
+    STORE_D1 -.->|D1 error| ROLLBACK
+    INDEX_VEC -.->|Vectorize error| DLQ
+    EMBED -.->|AI error| DLQ
+    ROLLBACK --> END[Return error to client]
+
+    style BEGIN fill:#e8f5e9
+    style COMMIT fill:#e8f5e9
+    style ROLLBACK fill:#ffebee
+    style DLQ fill:#fff3e0

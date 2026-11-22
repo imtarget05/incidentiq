@@ -14,3 +14,7 @@ dev = [
     "workers-py",
     "workers-runtime-sdk",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+

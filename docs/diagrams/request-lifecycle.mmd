@@ -1,0 +1,38 @@
+%%{init: {'theme': 'base'}}%%
+flowchart LR
+    subgraph Client ["Người dùng / Ứng dụng"]
+        UI[React Dashboard / Mobile / API Client]
+    end
+
+    subgraph Edge ["Edge / Cloudflare"]
+        CF[Cloudflare Workers (ai-knowledge-platform)]
+        WAF[Cloudflare WAF / Rate-limit]
+        CACHE[Cloudflare Cache / Assets]
+    end
+
+    subgraph Worker ["Worker Logic"]
+        API[API Routes /auth, /ingest, /search]
+        ETL[ETL Ingestion (inline / queue)]
+        RAG[Semantic Search + LLM Answer]
+    end
+
+    subgraph Storage ["Storage Layer (Cloudflare)"]
+        D1[(D1 Database - metadata)]
+        VEC[(Vectorize - vector index)]
+        QUE[(Cloudflare Queues - etl-queue / etl-dlq)]
+        KV[(KV - rate-limit / feature flags)]
+    end
+
+    UI --> CF --> WAF --> CACHE
+    CACHE --> API --> ETL --> QUE
+    API --> D1
+    API --> VEC
+    RAG --> VEC
+    RAG --> D1
+    API --> KV
+
+    style UI fill:#e1f5fe
+    style D1 fill:#fff3e0
+    style VEC fill:#fff3e0
+    style QUE fill:#fff3e0
+    style KV fill:#fff3e0

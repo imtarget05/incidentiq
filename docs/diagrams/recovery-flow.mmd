@@ -1,0 +1,30 @@
+%%{init: {'theme': 'base'}}%%
+flowchart TD
+    subgraph Normal ["Hoạt động bình thường"]
+        W[Worker Running]
+        D1[D1 Healthy]
+        VEC[Vectorize Healthy]
+        W --> D1
+        W --> VEC
+    end
+
+    subgraph Failure ["Sự cố: Bad deploy / D1 error / Vectorize error"]
+        DETECT[Phát hiện sự cố]
+        ROLLBACK[Rollback Worker phiên bản trước]
+        D1_RESTORE[Restore D1 từ backup / snapshot]
+    end
+
+    subgraph Recovery ["Khôi phục"]
+        VALIDATE[Kiểm tra D1 schema + Vectorize index count]
+        REOPEN[Mở lại hệ thống]
+        VERIFY[Verify search trả kết quả đúng]
+    end
+
+    Normal -->|Incident| DETECT --> ROLLBACK --> D1_RESTORE --> VALIDATE --> REOPEN --> VERIFY --> Normal
+
+    style DETECT fill:#ffebee
+    style ROLLBACK fill:#fff3e0
+    style D1_RESTORE fill:#fff3e0
+    style VALIDATE fill:#e8f5e9
+    style REOPEN fill:#e8f5e9
+    style VERIFY fill:#e8f5e9

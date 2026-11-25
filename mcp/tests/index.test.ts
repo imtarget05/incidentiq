@@ -251,6 +251,57 @@ describe("MCP server", () => {
     expect(env.DB.prepared.some((entry) => entry.sql.includes("documents_fts"))).toBe(false);
   });
 
+  it("allows each tenant's own tools and denies cross-tenant read and write before API dispatch", async () => {
+    const tenantKeys: Record<string, { id: string; key_hash: string; is_active: number; key_active: number }> = {
+      "tenant-a-key-123456": { id: "tenant-a", key_hash: await sha256Hex("tenant-a-key-123456"), is_active: 1, key_active: 1 },
+      "tenant-b-key-123456": { id: "tenant-b", key_hash: await sha256Hex("tenant-b-key-123456"), is_active: 1, key_active: 1 },
+    };
+    const env = makeEnv();
+    env.DB.prepare = (sql: string) => ({
+      bind: (...params: unknown[]) => {
+        env.DB.prepared.push({ sql, params });
+        return {
+          first: () => sql.includes("FROM tenants t JOIN api_keys")
+            ? Object.entries(tenantKeys).find(([key]) => key.slice(0, 8) === params[0])?.[1] ?? null
+            : null,
+          all: () => ({ results: [] }),
+          run: () => ({}),
+        };
+      },
+    });
+    fetchImpl = async (input, init) => {
+      const key = new Headers(init?.headers).get("X-Api-Key");
+      return new Response(JSON.stringify({ documents: [{ id: key === "tenant-a-key-123456" ? "doc-a" : "doc-b" }],
+        status: "uploaded", document_id: key === "tenant-a-key-123456" ? "doc-a" : "doc-b" }), { status: input.includes("/documents") && init?.method === "POST" ? 202 : 200 });
+    };
+    async function invoke(key: string, name: string, tenantId: string, args: Record<string, unknown>) {
+      const response = await handler.fetch(new Request("https://mcp.workers.dev/mcp", {
+        method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 17, method: "tools/call",
+          params: { name, arguments: { ...args, tenant_id: tenantId } } }),
+      }), env, {} as ExecutionContext);
+      return { status: response.status, body: await response.json() };
+    }
+
+    const ownA = await invoke("tenant-a-key-123456", "list_documents", "tenant-a", {});
+    const ownB = await invoke("tenant-b-key-123456", "list_documents", "tenant-b", {});
+    expect(ownA.status).toBe(200);
+    expect(ownA.body.result.documents[0].id).toBe("doc-a");
+    expect(ownB.status).toBe(200);
+    expect(ownB.body.result.documents[0].id).toBe("doc-b");
+
+    const dispatchedBeforeDenials = fetchCalls.length;
+    const crossRead = await invoke("tenant-a-key-123456", "list_documents", "tenant-b", {});
+    const crossWrite = await invoke("tenant-b-key-123456", "upload_document", "tenant-a", {
+      filename: "forbidden.txt", content: "cross tenant", idempotency_key: "cross-write",
+    });
+    expect(crossRead.status).toBe(403);
+    expect(crossRead.body.error.code).toBe(-32001);
+    expect(crossWrite.status).toBe(403);
+    expect(crossWrite.body.error.code).toBe(-32001);
+    expect(fetchCalls).toHaveLength(dispatchedBeforeDenials);
+  });
+
   it("rejects a tenant API key whose stored hash does not match", async () => {
     const env = makeEnv();
     env.DB.firstResult = { id: "t1", key_hash: "wrong-hash", is_active: 1, key_active: 1 };

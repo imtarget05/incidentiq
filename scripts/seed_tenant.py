@@ -28,6 +28,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "api" / "src"))
 from main import _sha256_hex  # noqa: E402
 
 
+def _sql_literal(value: str) -> str:
+    """Encode one SQLite string literal in the generated seed script."""
+    if not value or len(value) > 200 or any(ord(char) < 32 for char in value):
+        raise ValueError("tenant name must be 1-200 printable characters")
+    return "'" + value.replace("'", "''") + "'"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Seed demo tenants + API keys")
     parser.add_argument("--names", nargs="+", default=["Tenant A", "Tenant B"],
@@ -40,6 +47,8 @@ def main():
     print("SEEDING TENANTS (tenant isolation demo)")
     print("=" * 60)
     for name in args.names:
+        quoted_name = _sql_literal(name)
+        quoted_workspace_name = _sql_literal(f"Workspace for {name}")
         tenant_id = str(uuid.uuid4())
         workspace_id = str(uuid.uuid4())
         api_key = "sk_" + secrets.token_urlsafe(24)
@@ -49,11 +58,11 @@ def main():
 
         statements.append(
             f"INSERT INTO tenants (id, name, created_at, is_active) "
-            f"VALUES ('{tenant_id}', '{name}', {now}, 1);"
+            f"VALUES ('{tenant_id}', {quoted_name}, {now}, 1);"
         )
         statements.append(
             f"INSERT INTO workspaces (id, name, created_at, is_active) "
-            f"VALUES ('{workspace_id}', 'Workspace for {name}', {now}, 1);"
+            f"VALUES ('{workspace_id}', {quoted_workspace_name}, {now}, 1);"
         )
         statements.append(
             f"INSERT INTO workspace_members (id, workspace_id, tenant_id, role, created_at) "
